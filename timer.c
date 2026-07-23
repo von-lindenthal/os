@@ -1,11 +1,15 @@
 #include "timer.h"
 #include "io.h"
+#include "keyboard.h"
 
 static volatile uint32_t g_ticks;
 
 void timer_irq_handler(void)
 {
     g_ticks++;
+    /* Poll PS/2 every tick so the 1-byte HW buffer never overflows,
+       without using flaky keyboard IRQs on QEMU. */
+    keyboard_poll();
 }
 
 void timer_init(uint32_t hz)
@@ -15,7 +19,7 @@ void timer_init(uint32_t hz)
         hz = 100;
 
     uint32_t divisor = 1193182 / hz;
-    outb(0x43, 0x36); /* channel 0, lobyte/hibyte, mode 3 */
+    outb(0x43, 0x36);
     outb(0x40, (uint8_t)(divisor & 0xFF));
     outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
 }

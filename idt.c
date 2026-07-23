@@ -49,8 +49,8 @@ static void pic_remap(void)
     io_wait();
     outb(0xA1, 0x01);
     io_wait();
-    /* Unmask IRQ0 (timer) and IRQ1 (keyboard) only */
-    outb(0x21, 0xFC);
+    /* Unmask IRQ0 (timer) only — keyboard is polled to avoid QEMU double IRQs */
+    outb(0x21, 0xFE);
     outb(0xA1, 0xFF);
 }
 

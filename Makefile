@@ -29,7 +29,7 @@ irq.o: irq.s
 	$(CC) $(CFLAGS) -c $< -o $@
 
 run: $(KERNEL)
-	qemu-system-i386 -kernel $(KERNEL)
+	qemu-system-i386 -kernel $(KERNEL) -serial null -nic none
 
 run-serial: $(KERNEL)
 	qemu-system-i386 -kernel $(KERNEL) -nographic

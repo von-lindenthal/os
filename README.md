@@ -6,7 +6,7 @@ A freestanding x86 operating system with an interactive shell.
 
 ```powershell
 Invoke-WebRequest -Uri "https://github.com/von-lindenthal/os/raw/main/kernel.elf" -OutFile "kernel.elf"
-& "C:\Program Files\qemu\qemu-system-i386.exe" -kernel .\kernel.elf
+& "C:\Program Files\qemu\qemu-system-i386.exe" -kernel .\kernel.elf -serial null -nic none
 ```
 
 Click the QEMU window, then type at `guest@os>`.

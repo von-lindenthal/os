@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "io.h"
 #include "terminal.h"
+#include "timer.h"
 #include <stdint.h>
 
 #define KBD_BUF_SIZE 128
@@ -10,7 +11,11 @@ static volatile unsigned int kbd_head;
 static volatile unsigned int kbd_tail;
 static volatile int shift_pressed;
 static volatile int extended;
-static volatile int irqs_live;
+static volatile uint8_t last_make;
+static volatile int key_held;
+static volatile uint32_t last_make_tick;
+static volatile uint32_t last_push_tick;
+static volatile int last_push_code;
 
 static const char scancode_set1[] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -30,6 +35,12 @@ static const char scancode_set1_shift[] = {
 
 static void kbd_push(int c)
 {
+    uint32_t now = timer_ticks();
+    if (c == last_push_code && (now - last_push_tick) <= 3u)
+        return;
+    last_push_code = c;
+    last_push_tick = now;
+
     unsigned int next = (kbd_head + 1) % KBD_BUF_SIZE;
     if (next == kbd_tail)
         return;
@@ -48,8 +59,6 @@ static int kbd_pop(void)
 
 static char scancode_to_ascii(uint8_t scancode)
 {
-    if (scancode & 0x80)
-        return 0; /* ignore break codes */
     if (scancode >= sizeof(scancode_set1))
         return 0;
     if (shift_pressed)
@@ -65,13 +74,23 @@ static void handle_scancode(uint8_t scancode)
     }
 
     if (extended) {
+        uint8_t code = (uint8_t)(scancode & 0x7F);
+        int is_break = scancode & 0x80;
         extended = 0;
-        /* Ignore break codes for extended keys */
-        if (scancode & 0x80)
+        if (is_break) {
+            if (key_held && last_make == code)
+                key_held = 0;
             return;
-        if (scancode == 0x48)
+        }
+        if (key_held && last_make == code &&
+            (timer_ticks() - last_make_tick) <= 3u)
+            return;
+        last_make = code;
+        last_make_tick = timer_ticks();
+        key_held = 1;
+        if (code == 0x48)
             kbd_push(KEY_UP);
-        else if (scancode == 0x50)
+        else if (code == 0x50)
             kbd_push(KEY_DOWN);
         return;
     }
@@ -85,9 +104,31 @@ static void handle_scancode(uint8_t scancode)
         return;
     }
 
+    if (scancode & 0x80) {
+        uint8_t code = (uint8_t)(scancode & 0x7F);
+        if (key_held && last_make == code)
+            key_held = 0;
+        return;
+    }
+
+    if (key_held && last_make == scancode &&
+        (timer_ticks() - last_make_tick) <= 3u)
+        return;
+
+    last_make = scancode;
+    last_make_tick = timer_ticks();
+    key_held = 1;
+
     char c = scancode_to_ascii(scancode);
     if (c)
         kbd_push((unsigned char)c);
+}
+
+void keyboard_poll(void)
+{
+    int safety = 16;
+    while ((inb(0x64) & 1) && safety--)
+        handle_scancode(inb(0x60));
 }
 
 void keyboard_init(void)
@@ -96,31 +137,37 @@ void keyboard_init(void)
     kbd_tail = 0;
     shift_pressed = 0;
     extended = 0;
-    irqs_live = 0;
+    last_make = 0;
+    key_held = 0;
+    last_make_tick = 0;
+    last_push_tick = 0;
+    last_push_code = 0;
     while (inb(0x64) & 1)
         (void)inb(0x60);
 }
 
 void keyboard_enable_irq_mode(void)
 {
-    irqs_live = 1;
-    /* Drop any pending bytes so IRQ + leftover data can't double-fire */
+    /* Keep keyboard IRQ masked; timer IRQ calls keyboard_poll(). */
+    outb(0x21, (uint8_t)(inb(0x21) | 0x02));
     while (inb(0x64) & 1)
         (void)inb(0x60);
     kbd_head = 0;
     kbd_tail = 0;
+    key_held = 0;
+    last_make = 0;
+    last_push_code = 0;
 }
 
 void keyboard_irq_handler(void)
 {
-    /* Always drain the controller; only the IRQ path may read port 0x60
-       once IRQs are live (avoids double characters from IRQ + polling). */
     while (inb(0x64) & 1)
-        handle_scancode(inb(0x60));
+        (void)inb(0x60);
 }
 
 int keyboard_read_code(void)
 {
+    keyboard_poll();
     return kbd_pop();
 }
 
@@ -136,16 +183,17 @@ static int poll_serial_char(void)
 
 void input_drain(void)
 {
+    while (inb(0x64) & 1)
+        (void)inb(0x60);
     while (kbd_pop())
         ;
-    if (!irqs_live) {
-        while (inb(0x64) & 1)
-            (void)inb(0x60);
-    }
     while (serial_received())
         (void)serial_read();
     shift_pressed = 0;
     extended = 0;
+    key_held = 0;
+    last_make = 0;
+    last_push_code = 0;
 }
 
 int getchar_code(void)

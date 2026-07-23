@@ -265,3 +265,70 @@ void game_hangman(void)
     writestring(word);
     writestring("\n");
 }
+
+void game_rps(void)
+{
+    writestring("Rock-Paper-Scissors! Type r/p/s (q quits).\n");
+    int wins = 0, losses = 0, draws = 0;
+
+    for (;;) {
+        writestring("rps> ");
+        char buf[8];
+        size_t n = 0;
+        for (;;) {
+            int c = getchar_code();
+            if (c == '\n') {
+                putchar('\n');
+                break;
+            }
+            if (c == '\b') {
+                if (n > 0) {
+                    n--;
+                    putchar('\b');
+                }
+                continue;
+            }
+            if (c >= 32 && c < 256 && n < sizeof(buf) - 1) {
+                buf[n++] = (char)c;
+                putchar((char)c);
+            }
+        }
+        buf[n] = '\0';
+        if (buf[0] == 'q') {
+            writestring("score W/L/D = ");
+            write_dec((unsigned int)wins);
+            putchar('/');
+            write_dec((unsigned int)losses);
+            putchar('/');
+            write_dec((unsigned int)draws);
+            writestring("\n");
+            return;
+        }
+        char you = buf[0];
+        if (you >= 'A' && you <= 'Z')
+            you = (char)(you - 'A' + 'a');
+        if (you != 'r' && you != 'p' && you != 's') {
+            writestring("use r, p, or s\n");
+            continue;
+        }
+
+        char cpu = "rps"[timer_ticks() % 3u];
+        writestring("cpu=");
+        putchar(cpu);
+        writestring("  ");
+        if (you == cpu) {
+            writestring("draw\n");
+            draws++;
+        } else if ((you == 'r' && cpu == 's') ||
+                   (you == 'p' && cpu == 'r') ||
+                   (you == 's' && cpu == 'p')) {
+            writestring("you win\n");
+            wins++;
+            speaker_beep(880, 4);
+        } else {
+            writestring("you lose\n");
+            losses++;
+            speaker_beep(220, 6);
+        }
+    }
+}

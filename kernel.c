@@ -21,7 +21,7 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     fs_init();
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    writestring("os 0.5 booting...\n");
+    writestring("os 0.6 booting...\n");
     klog("boot: kernel_main entered");
 
     if (magic != MULTIBOOT_MAGIC) {
@@ -46,11 +46,10 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     timer_init(100);
     irq_install();
     keyboard_enable_irq_mode();
-    klog("boot: idt/timer/irqs online");
+    klog("boot: idt/timer online; kbd polled");
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-    writestring("Timer, keyboard, heap, RTC, PCI, gfx, auth ready.\n");
-    writestring("Type 'help'. Click the QEMU window to type.\n\n");
+    writestring("Ready. Type 'help'. Click QEMU window to type.\n\n");
     klog("boot: shell starting");
 
     input_drain();

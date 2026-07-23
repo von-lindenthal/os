@@ -18,13 +18,12 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
 make && make run
 ```
 
-## Highlights (0.5)
+## Highlights (0.6)
 
-- Login/auth (`login`, `whoami`, `passwd`)
-- Graphics demo (`gfx`) and music (`play c d e`)
-- Games: `snake`, `hangman`, `dice`, `guess`
-- Files: `grep`, `diff`, `sum`, `edit`, `run`
-- Aliases and variables
-- PCI, dmesg, RTC, heap, RAM filesystem
+- ATA disk identify (`disk`) and NIC scan (`net`)
+- Calendar (`cal`), themes, countdown
+- Math helpers: `bin`, `prime`, `fact`
+- `tail`, `ascii`, `motd`, `env`, `rps`
+- Previous: auth, gfx, snake/hangman, grep/diff, aliases, PCI, klog
 
 Type `help` for the full command list.

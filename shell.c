@@ -14,6 +14,8 @@
 #include "game.h"
 #include "gfx.h"
 #include "auth.h"
+#include "ata.h"
+#include "net.h"
 #include <stdint.h>
 
 #define INPUT_MAX 78
@@ -129,20 +131,21 @@ static void pad2(unsigned int v)
 static void cmd_help(void)
 {
     writestring("System:  help about sysinfo clear date time uptime ticks\n");
-    writestring("         sleep mem free cpu bench dmesg lspci beep color\n");
-    writestring("         reboot halt shutdown login logout whoami passwd\n");
-    writestring("Files:   ls df cat head wc hexdump grep diff sum touch\n");
-    writestring("         write append rm cp mv find run edit\n");
-    writestring("Vars:    set get vars alias\n");
+    writestring("         sleep mem free cpu bench dmesg lspci disk net\n");
+    writestring("         beep color theme reboot halt shutdown\n");
+    writestring("         login logout whoami passwd countdown\n");
+    writestring("Files:   ls df cat head tail wc hexdump grep diff sum\n");
+    writestring("         touch write append rm cp mv find run edit\n");
+    writestring("Vars:    set get vars alias env\n");
     writestring("Fun:     echo calc peek history rand fortune play gfx\n");
-    writestring("Games:   guess snake hangman dice\n");
-    writestring("Tips:    Up-arrow recalls previous command\n");
+    writestring("         ascii bin prime fact motd\n");
+    writestring("Games:   guess snake hangman dice rps\n");
 }
 
 static void cmd_about(void)
 {
-    writestring("os 0.5 — freestanding x86 kernel\n");
-    writestring("IRQs, RTC, heap, RAM fs, PCI, klog, gfx, games, auth\n");
+    writestring("os 0.6 — freestanding x86 kernel\n");
+    writestring("storage, net scan, more utils/games, themes\n");
 }
 
 static void print_prompt(void)
@@ -1029,6 +1032,234 @@ static void handle_command(char *line)
     }
     if (strcmp(cmd, "dice") == 0) {
         game_dice();
+        return;
+    }
+    if (strcmp(cmd, "rps") == 0) {
+        game_rps();
+        return;
+    }
+    if (strcmp(cmd, "disk") == 0) {
+        ata_identify();
+        return;
+    }
+    if (strcmp(cmd, "net") == 0) {
+        net_info();
+        return;
+    }
+    if (strcmp(cmd, "env") == 0) {
+        if (var_count == 0) {
+            writestring("(none)\n");
+            return;
+        }
+        for (int i = 0; i < var_count; i++) {
+            writestring(var_names[i]);
+            putchar('=');
+            writestring(var_vals[i]);
+            writestring("\n");
+        }
+        return;
+    }
+    if (strcmp(cmd, "motd") == 0) {
+        char buf[FS_DATA_MAX];
+        size_t len = 0;
+        if (fs_read("motd", buf, sizeof(buf), &len) != 0)
+            writestring("(no motd)\n");
+        else {
+            writestring(buf);
+            if (len == 0 || buf[len - 1] != '\n')
+                writestring("\n");
+        }
+        return;
+    }
+    if (strcmp(cmd, "ascii") == 0) {
+        for (int i = 32; i < 127; i++) {
+            putchar((char)i);
+            if ((i - 31) % 32 == 0)
+                writestring("\n");
+        }
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "bin") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            writestring("usage: bin <number>\n");
+            return;
+        }
+        const char *p = rest;
+        unsigned int n = parse_uint(&p);
+        writestring("0b");
+        if (n == 0) {
+            writestring("0\n");
+            return;
+        }
+        char bits[33];
+        int i = 0;
+        unsigned int x = n;
+        while (x) {
+            bits[i++] = (char)('0' + (x & 1));
+            x >>= 1;
+        }
+        while (i--)
+            putchar(bits[i]);
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "prime") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            writestring("usage: prime <n>\n");
+            return;
+        }
+        const char *p = rest;
+        unsigned int n = parse_uint(&p);
+        if (n < 2) {
+            writestring("not prime\n");
+            return;
+        }
+        int is_p = 1;
+        for (unsigned int d = 2; d * d <= n; d++) {
+            if (n % d == 0) {
+                is_p = 0;
+                break;
+            }
+        }
+        writestring(is_p ? "prime\n" : "not prime\n");
+        return;
+    }
+    if (strcmp(cmd, "fact") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            writestring("usage: fact <n>  (n<=12)\n");
+            return;
+        }
+        const char *p = rest;
+        unsigned int n = parse_uint(&p);
+        if (n > 12) {
+            writestring("too large\n");
+            return;
+        }
+        unsigned int f = 1;
+        for (unsigned int i = 2; i <= n; i++)
+            f *= i;
+        write_dec(f);
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "countdown") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            writestring("usage: countdown <seconds>\n");
+            return;
+        }
+        const char *p = rest;
+        unsigned int n = parse_uint(&p);
+        if (n > 60)
+            n = 60;
+        while (n > 0) {
+            write_dec(n);
+            writestring("...\n");
+            timer_sleep(100);
+            n--;
+        }
+        writestring("done!\n");
+        speaker_beep(880, 10);
+        return;
+    }
+    if (strcmp(cmd, "theme") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (strcmp(rest, "matrix") == 0)
+            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+        else if (strcmp(rest, "ocean") == 0)
+            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLUE));
+        else if (strcmp(rest, "amber") == 0)
+            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));
+        else if (strcmp(rest, "danger") == 0)
+            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+        else if (strcmp(rest, "default") == 0)
+            terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        else {
+            writestring("usage: theme <matrix|ocean|amber|danger|default>\n");
+            return;
+        }
+        writestring("theme set\n");
+        return;
+    }
+    if (strcmp(cmd, "tail") == 0) {
+        char *name = next_token(&rest);
+        char *narg = next_token(&rest);
+        if (!*name) {
+            writestring("usage: tail <file> [lines]\n");
+            return;
+        }
+        unsigned int want = 10;
+        if (*narg) {
+            const char *p = narg;
+            want = parse_uint(&p);
+        }
+        char buf[FS_DATA_MAX];
+        size_t len = 0;
+        if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+            writestring("file not found\n");
+            return;
+        }
+        /* Count lines, find start */
+        unsigned int lines = 0;
+        for (size_t i = 0; i < len; i++)
+            if (buf[i] == '\n')
+                lines++;
+        if (len > 0 && buf[len - 1] != '\n')
+            lines++;
+        unsigned int skip = (lines > want) ? (lines - want) : 0;
+        unsigned int seen = 0;
+        size_t i = 0;
+        while (i < len && seen < skip) {
+            if (buf[i++] == '\n')
+                seen++;
+        }
+        while (i < len)
+            putchar(buf[i++]);
+        if (len == 0 || buf[len - 1] != '\n')
+            writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "cal") == 0) {
+        struct rtc_time t;
+        rtc_read(&t);
+        writestring("    ");
+        write_dec(t.month);
+        putchar('/');
+        write_dec(t.year);
+        writestring("\nSu Mo Tu We Th Fr Sa\n");
+        /* Sakamoto day-of-week for day 1 */
+        int y = (int)t.year;
+        int m = (int)t.month;
+        static const int t_vals[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+        int yy = y - (m < 3);
+        int dow = (yy + yy / 4 - yy / 100 + yy / 400 + t_vals[m - 1] + 1) % 7;
+        int dim = 31;
+        if (m == 4 || m == 6 || m == 9 || m == 11)
+            dim = 30;
+        else if (m == 2) {
+            int leap = ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0));
+            dim = leap ? 29 : 28;
+        }
+        for (int i = 0; i < dow; i++)
+            writestring("   ");
+        for (int d = 1; d <= dim; d++) {
+            if (d < 10)
+                putchar(' ');
+            write_dec((unsigned int)d);
+            putchar(' ');
+            if ((dow + d) % 7 == 0)
+                writestring("\n");
+        }
+        writestring("\n");
         return;
     }
     if (strcmp(cmd, "gfx") == 0) {

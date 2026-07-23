@@ -33,6 +33,7 @@ static char var_names[VAR_MAX][VAR_NAME];
 static char var_vals[VAR_MAX][VAR_VAL];
 static int var_count;
 static int script_depth;
+static int alias_depth;
 static char alias_names[ALIAS_MAX][VAR_NAME];
 static char alias_vals[ALIAS_MAX][INPUT_MAX + 1];
 static int alias_count;
@@ -70,12 +71,12 @@ static void hist_add(const char *line)
     if (hist_count > 0 && strcmp(history[hist_count - 1], line) == 0)
         return;
     if (hist_count < HIST_MAX) {
-        strcpy(history[hist_count++], line);
+        strlcpy(history[hist_count++], line, sizeof(history[0]));
         return;
     }
     for (int i = 1; i < HIST_MAX; i++)
-        strcpy(history[i - 1], history[i]);
-    strcpy(history[HIST_MAX - 1], line);
+        strlcpy(history[i - 1], history[i], sizeof(history[0]));
+    strlcpy(history[HIST_MAX - 1], line, sizeof(history[0]));
 }
 
 static uint32_t rand_u32(void)
@@ -144,8 +145,8 @@ static void cmd_help(void)
 
 static void cmd_about(void)
 {
-    writestring("os 0.6 — freestanding x86 kernel\n");
-    writestring("storage, net scan, more utils/games, themes\n");
+    writestring("os 0.7 — freestanding x86 kernel\n");
+    writestring("GDT/IDT faults, panic, bounded strings, safer FS/shell\n");
 }
 
 static void print_prompt(void)
@@ -643,10 +644,16 @@ static void cmd_run(const char *name)
 
 static void handle_command(char *line)
 {
+    if (!line)
+        return;
     while (*line == ' ')
         line++;
     if (*line == '\0')
         return;
+    if (strnlen(line, INPUT_MAX + 2) > INPUT_MAX) {
+        writestring("line too long\n");
+        return;
+    }
 
     if (strcmp(line, "!!") == 0) {
         if (hist_count == 0) {
@@ -656,7 +663,7 @@ static void handle_command(char *line)
         writestring(history[hist_count - 1]);
         writestring("\n");
         char again[INPUT_MAX + 1];
-        strcpy(again, history[hist_count - 1]);
+        strlcpy(again, history[hist_count - 1], sizeof(again));
         handle_command(again);
         return;
     }
@@ -666,23 +673,31 @@ static void handle_command(char *line)
     /* Alias expansion for the first token only */
     {
         char tmp[INPUT_MAX + 1];
-        strcpy(tmp, line);
+        strlcpy(tmp, line, sizeof(tmp));
         char *tr = tmp;
         char *tcmd = next_token(&tr);
         for (int i = 0; i < alias_count; i++) {
             if (strcmp(tcmd, alias_names[i]) == 0) {
+                if (alias_depth >= 4) {
+                    writestring("alias recursion limit\n");
+                    return;
+                }
                 char expanded[INPUT_MAX + 1];
                 size_t el = strlen(alias_vals[i]);
                 if (el >= INPUT_MAX)
                     break;
-                strcpy(expanded, alias_vals[i]);
+                strlcpy(expanded, alias_vals[i], sizeof(expanded));
                 if (*tr) {
-                    if (el + 1 + strlen(tr) >= INPUT_MAX)
-                        break;
+                    if (el + 1 + strlen(tr) >= INPUT_MAX) {
+                        writestring("expanded alias too long\n");
+                        return;
+                    }
                     expanded[el] = ' ';
-                    strcpy(expanded + el + 1, tr);
+                    strlcpy(expanded + el + 1, tr, sizeof(expanded) - el - 1);
                 }
+                alias_depth++;
                 handle_command(expanded);
+                alias_depth--;
                 return;
             }
         }
@@ -690,6 +705,8 @@ static void handle_command(char *line)
 
     char *rest = line;
     char *cmd = next_token(&rest);
+    if (!cmd || !cmd[0])
+        return;
 
     if (strcmp(cmd, "help") == 0) {
         cmd_help();
@@ -1586,6 +1603,7 @@ void shell_run(struct multiboot_info *mb)
     var_count = 0;
     alias_count = 0;
     script_depth = 0;
+    alias_depth = 0;
     rng_state = timer_ticks() ^ 0xC0FFEEu;
     auth_init();
 

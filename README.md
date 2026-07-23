@@ -18,12 +18,13 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
 make && make run
 ```
 
-## Highlights (0.6)
+## Robustness (0.7)
 
-- ATA disk identify (`disk`) and NIC scan (`net`)
-- Calendar (`cal`), themes, countdown
-- Math helpers: `bin`, `prime`, `fact`
-- `tail`, `ascii`, `motd`, `env`, `rps`
-- Previous: auth, gfx, snake/hangman, grep/diff, aliases, PCI, klog
+- Own GDT + full CPU exception handlers
+- Kernel panic path with logged faults
+- Bounded string helpers (`strlcpy` / name validation)
+- Safer RAM filesystem and heap metadata checks
+- Alias/script recursion limits
+- Keyboard polled from timer (avoids QEMU double-key IRQ bug)
 
-Type `help` for the full command list.
+Type `help` for commands.

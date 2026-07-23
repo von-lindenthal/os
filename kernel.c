@@ -1,6 +1,7 @@
 #include "multiboot.h"
 #include "terminal.h"
 #include "keyboard.h"
+#include "gdt.h"
 #include "idt.h"
 #include "timer.h"
 #include "fs.h"
@@ -21,8 +22,11 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     fs_init();
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    writestring("os 0.6 booting...\n");
+    writestring("os 0.7 booting...\n");
     klog("boot: kernel_main entered");
+
+    gdt_init();
+    klog("boot: gdt loaded");
 
     if (magic != MULTIBOOT_MAGIC) {
         terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
@@ -46,7 +50,7 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     timer_init(100);
     irq_install();
     keyboard_enable_irq_mode();
-    klog("boot: idt/timer online; kbd polled");
+    klog("boot: idt/exceptions/timer online");
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     writestring("Ready. Type 'help'. Click QEMU window to type.\n\n");

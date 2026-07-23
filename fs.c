@@ -50,7 +50,7 @@ int fs_exists(const char *name)
 
 int fs_create(const char *name)
 {
-    if (!name || !name[0] || strlen(name) >= FS_NAME_MAX)
+    if (!is_valid_name(name, FS_NAME_MAX))
         return -1;
     if (fs_find(name))
         return 0;
@@ -60,7 +60,7 @@ int fs_create(const char *name)
         return -2;
 
     f->used = 1;
-    strcpy(f->name, name);
+    strlcpy(f->name, name, FS_NAME_MAX);
     f->len = 0;
     f->data[0] = '\0';
     return 0;
@@ -68,6 +68,8 @@ int fs_create(const char *name)
 
 int fs_write(const char *name, const char *data)
 {
+    if (!name || !data)
+        return -1;
     struct file *f = fs_find(name);
     if (!f)
         return -1;
@@ -129,16 +131,18 @@ int fs_rename(const char *old_name, const char *new_name)
     struct file *f = fs_find(old_name);
     if (!f)
         return -1;
-    if (!new_name || !new_name[0] || strlen(new_name) >= FS_NAME_MAX)
+    if (!is_valid_name(new_name, FS_NAME_MAX))
         return -2;
     if (fs_find(new_name))
         return -3;
-    strcpy(f->name, new_name);
+    strlcpy(f->name, new_name, FS_NAME_MAX);
     return 0;
 }
 
 int fs_copy(const char *src, const char *dst)
 {
+    if (!src || !dst)
+        return -1;
     struct file *f = fs_find(src);
     if (!f)
         return -1;
@@ -149,6 +153,8 @@ int fs_copy(const char *src, const char *dst)
 
 void fs_list(void (*cb)(const char *name, size_t len))
 {
+    if (!cb)
+        return;
     for (int i = 0; i < FS_MAX_FILES; i++) {
         if (files[i].used)
             cb(files[i].name, files[i].len);

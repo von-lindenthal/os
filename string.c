@@ -3,7 +3,19 @@
 size_t strlen(const char *str)
 {
     size_t len = 0;
+    if (!str)
+        return 0;
     while (str[len])
+        len++;
+    return len;
+}
+
+size_t strnlen(const char *str, size_t max)
+{
+    size_t len = 0;
+    if (!str)
+        return 0;
+    while (len < max && str[len])
         len++;
     return len;
 }
@@ -57,9 +69,57 @@ int memcmp(const void *a, const void *b, size_t n)
 char *strcpy(char *dst, const char *src)
 {
     char *out = dst;
+    if (!dst || !src)
+        return dst;
     while ((*dst++ = *src++))
         ;
     return out;
+}
+
+size_t strlcpy(char *dst, const char *src, size_t dstsize)
+{
+    size_t srclen = strlen(src);
+    if (!dst || dstsize == 0)
+        return srclen;
+    size_t copy = srclen;
+    if (copy >= dstsize)
+        copy = dstsize - 1;
+    memcpy(dst, src, copy);
+    dst[copy] = '\0';
+    return srclen;
+}
+
+size_t strlcat(char *dst, const char *src, size_t dstsize)
+{
+    size_t dstlen = strnlen(dst, dstsize);
+    size_t srclen = strlen(src);
+    if (dstlen == dstsize)
+        return dstsize + srclen;
+    size_t copy = srclen;
+    if (dstlen + copy >= dstsize)
+        copy = dstsize - dstlen - 1;
+    memcpy(dst + dstlen, src, copy);
+    dst[dstlen + copy] = '\0';
+    return dstlen + srclen;
+}
+
+int is_valid_name(const char *name, size_t max_len)
+{
+    if (!name || !name[0])
+        return 0;
+    size_t n = strnlen(name, max_len + 1);
+    if (n == 0 || n >= max_len)
+        return 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = name[i];
+        int ok = (c >= 'a' && c <= 'z') ||
+                 (c >= 'A' && c <= 'Z') ||
+                 (c >= '0' && c <= '9') ||
+                 c == '.' || c == '_' || c == '-';
+        if (!ok)
+            return 0;
+    }
+    return 1;
 }
 
 void u32toa(unsigned int value, char *buf, int base)

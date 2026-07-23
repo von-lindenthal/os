@@ -3,6 +3,9 @@
 
 #define KEY_UP   0x100
 #define KEY_DOWN 0x101
+#define KEY_CTRL_C 3
+#define KEY_CTRL_L 12
+#define KEY_CTRL_U 21
 
 void keyboard_init(void);
 void keyboard_enable_irq_mode(void);

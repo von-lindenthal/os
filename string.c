@@ -78,6 +78,8 @@ char *strcpy(char *dst, const char *src)
 
 size_t strlcpy(char *dst, const char *src, size_t dstsize)
 {
+    if (!src)
+        src = "";
     size_t srclen = strlen(src);
     if (!dst || dstsize == 0)
         return srclen;
@@ -124,7 +126,7 @@ int is_valid_name(const char *name, size_t max_len)
 
 void u32toa(unsigned int value, char *buf, int base)
 {
-    char tmp[16];
+    char tmp[33];
     int i = 0;
 
     if (base < 2 || base > 16) {

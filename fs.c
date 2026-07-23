@@ -86,13 +86,18 @@ int fs_write(const char *name, const char *data)
 
 int fs_append(const char *name, const char *data)
 {
+    if (!name || !data)
+        return -1;
     struct file *f = fs_find(name);
     if (!f)
         return -1;
+    if (f->len >= FS_DATA_MAX - 1)
+        return 0;
 
     size_t add = strlen(data);
-    if (f->len + add >= FS_DATA_MAX)
-        add = FS_DATA_MAX - 1 - f->len;
+    size_t room = (FS_DATA_MAX - 1) - f->len;
+    if (add > room)
+        add = room;
     memcpy(f->data + f->len, data, add);
     f->len += add;
     f->data[f->len] = '\0';

@@ -36,11 +36,22 @@ run-serial: $(KERNEL)
 
 test-shell: $(KERNEL)
 	dd if=/dev/zero of=/tmp/os-disk.img bs=1M count=8 status=none
-	(sleep 0.5; printf 'about\nmotd\ncal\nbin 42\nprime 17\nfact 5\nalias loop=loop\nloop\ntail readme.txt 1\ndisk\nnet\ncountdown 1\nhalt\n') | \
+	@printf '%s\n' \
+		'about' 'motd' 'cal' 'bin 42' 'hex 255' 'base 255 16' 'prime 17' 'fact 5' \
+		'alias loop=loop' 'loop' 'unalias loop' \
+		'set x=hi' 'echo $$x' 'unset x' \
+		'yank hello' 'clip' 'paste clip.txt' 'cat clip.txt' \
+		'ps' 'debug' \
+		'stopwatch start' 'sleep 1' 'stopwatch stop' 'stopwatch status' \
+		'repeat 2 echo hi' 'tail readme.txt 1' \
+		'write z.txt c\nb\na\na' 'cat z.txt' 'sort z.txt' 'uniq z.txt' 'rev os' \
+		'disk' 'net' 'countdown 1' 'halt' > /tmp/os-shell-test.txt
+	@(sleep 0.5; cat /tmp/os-shell-test.txt) | \
 	qemu-system-i386 -kernel $(KERNEL) -display none \
 		-drive file=/tmp/os-disk.img,format=raw,if=ide \
 		-serial stdio \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+		-nic none \
 		-no-reboot || [ $$? -eq 33 ]
 
 clean:

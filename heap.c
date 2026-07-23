@@ -4,8 +4,6 @@
 #include <stdint.h>
 
 #define HEAP_SIZE (64 * 1024)
-#define HEAP_MAGIC 0xHEApu /* will use numeric */
-#undef HEAP_MAGIC
 #define HEAP_MAGIC 0x48454150u /* 'HEAP' */
 
 struct heap_hdr {

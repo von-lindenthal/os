@@ -7,8 +7,8 @@ static int logged_in;
 
 void auth_init(void)
 {
-    strcpy(current_user, "guest");
-    strcpy(password, "os");
+    strlcpy(current_user, "guest", sizeof(current_user));
+    strlcpy(password, "os", sizeof(password));
     logged_in = 0;
 }
 
@@ -25,7 +25,7 @@ int auth_login(const char *user, const char *pass)
         pass = "";
     if (strcmp(pass, password) != 0)
         return -2;
-    strcpy(current_user, user);
+    strlcpy(current_user, user, sizeof(current_user));
     logged_in = 1;
     return 0;
 }
@@ -33,13 +33,13 @@ int auth_login(const char *user, const char *pass)
 void auth_logout(void)
 {
     logged_in = 0;
-    strcpy(current_user, "guest");
+    strlcpy(current_user, "guest", sizeof(current_user));
 }
 
 int auth_set_pass(const char *pass)
 {
     if (!pass || strlen(pass) >= sizeof(password))
         return -1;
-    strcpy(password, pass);
+    strlcpy(password, pass, sizeof(password));
     return 0;
 }

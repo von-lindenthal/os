@@ -10,6 +10,7 @@ static volatile int kbd_buf[KBD_BUF_SIZE];
 static volatile unsigned int kbd_head;
 static volatile unsigned int kbd_tail;
 static volatile int shift_pressed;
+static volatile int ctrl_pressed;
 static volatile int extended;
 static volatile uint8_t last_make;
 static volatile int key_held;
@@ -103,6 +104,14 @@ static void handle_scancode(uint8_t scancode)
         shift_pressed = 0;
         return;
     }
+    if (scancode == 0x1D) {
+        ctrl_pressed = 1;
+        return;
+    }
+    if (scancode == 0x9D) {
+        ctrl_pressed = 0;
+        return;
+    }
 
     if (scancode & 0x80) {
         uint8_t code = (uint8_t)(scancode & 0x7F);
@@ -120,8 +129,18 @@ static void handle_scancode(uint8_t scancode)
     key_held = 1;
 
     char c = scancode_to_ascii(scancode);
-    if (c)
-        kbd_push((unsigned char)c);
+    if (!c)
+        return;
+
+    if (ctrl_pressed) {
+        if (c >= 'a' && c <= 'z')
+            kbd_push((int)(c - 'a' + 1));
+        else if (c >= 'A' && c <= 'Z')
+            kbd_push((int)(c - 'A' + 1));
+        return;
+    }
+
+    kbd_push((unsigned char)c);
 }
 
 void keyboard_poll(void)
@@ -136,6 +155,7 @@ void keyboard_init(void)
     kbd_head = 0;
     kbd_tail = 0;
     shift_pressed = 0;
+    ctrl_pressed = 0;
     extended = 0;
     last_make = 0;
     key_held = 0;
@@ -157,6 +177,7 @@ void keyboard_enable_irq_mode(void)
     key_held = 0;
     last_make = 0;
     last_push_code = 0;
+    ctrl_pressed = 0;
 }
 
 void keyboard_irq_handler(void)
@@ -190,6 +211,7 @@ void input_drain(void)
     while (serial_received())
         (void)serial_read();
     shift_pressed = 0;
+    ctrl_pressed = 0;
     extended = 0;
     key_held = 0;
     last_make = 0;

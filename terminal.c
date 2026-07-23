@@ -139,7 +139,7 @@ void writestring(const char *data)
 
 void write_u32(unsigned int value, int base)
 {
-    char buf[16];
+    char buf[33];
     u32toa(value, buf, base);
     writestring(buf);
 }

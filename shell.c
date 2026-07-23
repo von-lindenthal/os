@@ -9,15 +9,25 @@
 #include "rtc.h"
 #include "heap.h"
 #include "speaker.h"
+#include "klog.h"
+#include "pci.h"
+#include "game.h"
 #include <stdint.h>
 
 #define INPUT_MAX 78
 #define HIST_MAX 8
+#define VAR_MAX 8
+#define VAR_NAME 24
+#define VAR_VAL 48
 
 static struct multiboot_info *g_mb;
 static char history[8][79];
 static int hist_count;
 static uint32_t rng_state;
+static char var_names[VAR_MAX][VAR_NAME];
+static char var_vals[VAR_MAX][VAR_VAL];
+static int var_count;
+static int script_depth;
 
 static void qemu_exit(uint8_t status)
 {
@@ -120,16 +130,19 @@ static void pad2(unsigned int v)
 static void cmd_help(void)
 {
     writestring("System:  help about clear date time uptime ticks sleep\n");
-    writestring("         mem free cpu bench reboot halt beep color\n");
-    writestring("Files:   ls cat touch write append rm cp mv df\n");
-    writestring("Misc:    echo calc peek history rand guess\n");
+    writestring("         mem free cpu sysinfo bench dmesg lspci\n");
+    writestring("         beep color reboot halt shutdown\n");
+    writestring("Files:   ls df cat head wc hexdump touch write append\n");
+    writestring("         rm cp mv find run\n");
+    writestring("Vars:    set name=value  get name  vars\n");
+    writestring("Misc:    echo calc peek history !! rand guess snake\n");
     writestring("Tips:    Up-arrow recalls previous command\n");
 }
 
 static void cmd_about(void)
 {
-    writestring("os 0.3 — freestanding x86 kernel\n");
-    writestring("IRQs, PIT, RTC, heap, RAM fs, speaker, shell history\n");
+    writestring("os 0.4 — freestanding x86 kernel\n");
+    writestring("IRQs, PIT, RTC, heap, RAM fs, PCI, klog, games\n");
 }
 
 static void cmd_date(void)
@@ -434,6 +447,189 @@ static void cmd_guess(void)
     writestring("\n");
 }
 
+static const char *var_get(const char *name)
+{
+    for (int i = 0; i < var_count; i++) {
+        if (strcmp(var_names[i], name) == 0)
+            return var_vals[i];
+    }
+    return 0;
+}
+
+static int var_set(const char *name, const char *val)
+{
+    if (!name[0] || strlen(name) >= VAR_NAME || strlen(val) >= VAR_VAL)
+        return -1;
+    for (int i = 0; i < var_count; i++) {
+        if (strcmp(var_names[i], name) == 0) {
+            strcpy(var_vals[i], val);
+            return 0;
+        }
+    }
+    if (var_count >= VAR_MAX)
+        return -2;
+    strcpy(var_names[var_count], name);
+    strcpy(var_vals[var_count], val);
+    var_count++;
+    return 0;
+}
+
+static void cmd_hexdump(const char *name)
+{
+    char buf[FS_DATA_MAX];
+    size_t len = 0;
+    if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+        writestring("file not found\n");
+        return;
+    }
+    for (size_t i = 0; i < len; i += 16) {
+        write_u32((unsigned int)i, 16);
+        writestring(": ");
+        for (size_t j = 0; j < 16; j++) {
+            if (i + j < len) {
+                uint8_t b = (uint8_t)buf[i + j];
+                if (b < 16)
+                    putchar('0');
+                write_u32(b, 16);
+                putchar(' ');
+            } else {
+                writestring("   ");
+            }
+        }
+        writestring(" |");
+        for (size_t j = 0; j < 16 && i + j < len; j++) {
+            char c = buf[i + j];
+            putchar((c >= 32 && c <= 126) ? c : '.');
+        }
+        writestring("|\n");
+    }
+}
+
+static void cmd_wc(const char *name)
+{
+    char buf[FS_DATA_MAX];
+    size_t len = 0;
+    if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+        writestring("file not found\n");
+        return;
+    }
+    unsigned int lines = 0, words = 0, in_word = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c == '\n')
+            lines++;
+        if (c == ' ' || c == '\n' || c == '\t') {
+            in_word = 0;
+        } else if (!in_word) {
+            in_word = 1;
+            words++;
+        }
+    }
+    if (len > 0 && buf[len - 1] != '\n')
+        lines++;
+    write_dec(lines);
+    putchar(' ');
+    write_dec(words);
+    putchar(' ');
+    write_dec((unsigned int)len);
+    putchar(' ');
+    writestring(name);
+    writestring("\n");
+}
+
+static void cmd_head(const char *name, unsigned int nlines)
+{
+    char buf[FS_DATA_MAX];
+    size_t len = 0;
+    if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+        writestring("file not found\n");
+        return;
+    }
+    if (nlines == 0)
+        nlines = 10;
+    unsigned int shown = 0;
+    for (size_t i = 0; i < len && shown < nlines; i++) {
+        putchar(buf[i]);
+        if (buf[i] == '\n')
+            shown++;
+    }
+    if (len > 0 && buf[len - 1] != '\n' && shown < nlines)
+        writestring("\n");
+}
+
+static char g_find_pat[FS_NAME_MAX];
+static int g_find_hits;
+
+static void find_cb(const char *name, size_t len)
+{
+    (void)len;
+    for (size_t i = 0; name[i]; i++) {
+        size_t j = 0;
+        while (g_find_pat[j] && name[i + j] == g_find_pat[j])
+            j++;
+        if (!g_find_pat[j]) {
+            writestring("  ");
+            writestring(name);
+            writestring("\n");
+            g_find_hits++;
+            return;
+        }
+    }
+}
+
+static void cmd_sysinfo(void)
+{
+    cmd_about();
+    cmd_date();
+    cmd_uptime();
+    cmd_free();
+}
+
+static void shutdown_qemu(void)
+{
+    writestring("Shutting down...\n");
+    __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+    __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0xB004));
+    qemu_exit(0x10);
+    cli();
+    for (;;)
+        hlt();
+}
+
+static void handle_command(char *line);
+
+static void cmd_run(const char *name)
+{
+    if (script_depth > 3) {
+        writestring("script nesting too deep\n");
+        return;
+    }
+    char buf[FS_DATA_MAX];
+    size_t len = 0;
+    if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+        writestring("file not found\n");
+        return;
+    }
+    script_depth++;
+    size_t i = 0;
+    while (i < len) {
+        char line[INPUT_MAX + 1];
+        size_t n = 0;
+        while (i < len && buf[i] != '\n' && n < INPUT_MAX)
+            line[n++] = buf[i++];
+        if (i < len && buf[i] == '\n')
+            i++;
+        line[n] = '\0';
+        if (line[0] == '#' || line[0] == '\0')
+            continue;
+        writestring("+ ");
+        writestring(line);
+        writestring("\n");
+        handle_command(line);
+    }
+    script_depth--;
+}
+
 static void handle_command(char *line)
 {
     while (*line == ' ')
@@ -661,8 +857,137 @@ static void handle_command(char *line)
     if (strcmp(cmd, "echo") == 0) {
         while (*rest == ' ')
             rest++;
-        writestring(rest);
-        writestring("\n");
+        if (rest[0] == '$' && rest[1]) {
+            const char *v = var_get(rest + 1);
+            writestring(v ? v : "");
+            writestring("\n");
+        } else {
+            writestring(rest);
+            writestring("\n");
+        }
+        return;
+    }
+    if (strcmp(cmd, "set") == 0) {
+        while (*rest == ' ')
+            rest++;
+        char *eq = rest;
+        while (*eq && *eq != '=')
+            eq++;
+        if (!*eq || eq == rest) {
+            writestring("usage: set name=value\n");
+            return;
+        }
+        *eq = '\0';
+        int rc = var_set(rest, eq + 1);
+        if (rc == -1)
+            writestring("invalid name/value\n");
+        else if (rc == -2)
+            writestring("too many vars\n");
+        else
+            writestring("ok\n");
+        return;
+    }
+    if (strcmp(cmd, "get") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: get name\n");
+            return;
+        }
+        const char *v = var_get(name);
+        if (!v)
+            writestring("(unset)\n");
+        else {
+            writestring(v);
+            writestring("\n");
+        }
+        return;
+    }
+    if (strcmp(cmd, "vars") == 0) {
+        if (var_count == 0) {
+            writestring("(none)\n");
+            return;
+        }
+        for (int i = 0; i < var_count; i++) {
+            writestring(var_names[i]);
+            putchar('=');
+            writestring(var_vals[i]);
+            writestring("\n");
+        }
+        return;
+    }
+    if (strcmp(cmd, "hexdump") == 0 || strcmp(cmd, "hd") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: hexdump <file>\n");
+            return;
+        }
+        cmd_hexdump(name);
+        return;
+    }
+    if (strcmp(cmd, "wc") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: wc <file>\n");
+            return;
+        }
+        cmd_wc(name);
+        return;
+    }
+    if (strcmp(cmd, "head") == 0) {
+        char *a = next_token(&rest);
+        char *b = next_token(&rest);
+        if (!*a) {
+            writestring("usage: head <file> [lines]\n");
+            return;
+        }
+        unsigned int n = 10;
+        if (*b) {
+            const char *p = b;
+            n = parse_uint(&p);
+        }
+        cmd_head(a, n);
+        return;
+    }
+    if (strcmp(cmd, "find") == 0) {
+        char *pat = next_token(&rest);
+        if (!*pat) {
+            writestring("usage: find <substring>\n");
+            return;
+        }
+        if (strlen(pat) >= FS_NAME_MAX) {
+            writestring("pattern too long\n");
+            return;
+        }
+        strcpy(g_find_pat, pat);
+        g_find_hits = 0;
+        fs_list(find_cb);
+        if (g_find_hits == 0)
+            writestring("(no matches)\n");
+        return;
+    }
+    if (strcmp(cmd, "run") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: run <file>\n");
+            return;
+        }
+        cmd_run(name);
+        return;
+    }
+    if (strcmp(cmd, "dmesg") == 0) {
+        klog_dump();
+        return;
+    }
+    if (strcmp(cmd, "lspci") == 0) {
+        pci_list();
+        return;
+    }
+    if (strcmp(cmd, "sysinfo") == 0) {
+        cmd_sysinfo();
+        return;
+    }
+    if (strcmp(cmd, "snake") == 0) {
+        game_snake();
         return;
     }
     if (strcmp(cmd, "calc") == 0) {
@@ -693,6 +1018,10 @@ static void handle_command(char *line)
     }
     if (strcmp(cmd, "guess") == 0) {
         cmd_guess();
+        return;
+    }
+    if (strcmp(cmd, "shutdown") == 0) {
+        shutdown_qemu();
         return;
     }
     if (strcmp(cmd, "halt") == 0) {
@@ -728,6 +1057,8 @@ void shell_run(struct multiboot_info *mb)
 
     g_mb = mb;
     hist_count = 0;
+    var_count = 0;
+    script_depth = 0;
     rng_state = timer_ticks() ^ 0xC0FFEEu;
 
     print_prompt();

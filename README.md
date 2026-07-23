@@ -20,20 +20,18 @@ make && make run
 
 ## Commands
 
-**System:** `help` `about` `clear` `date` `time` `uptime` `ticks` `sleep` `mem` `free` `cpu` `bench` `beep` `color` `reboot` `halt`
+**System:** `help` `about` `sysinfo` `clear` `date` `time` `uptime` `ticks` `sleep` `mem` `free` `cpu` `bench` `dmesg` `lspci` `beep` `color` `reboot` `halt` `shutdown`
 
-**Files:** `ls` `df` `cat` `touch` `write` `append` `rm` `cp` `mv`
+**Files:** `ls` `df` `cat` `head` `wc` `hexdump` `touch` `write` `append` `rm` `cp` `mv` `find` `run`
 
-**Misc:** `echo` `calc` `peek` `history` `!!` `rand` `guess`
+**Vars:** `set name=value` `get name` `vars` `echo $name`
 
-Up-arrow recalls previous commands.
+**Misc:** `echo` `calc` `peek` `history` `!!` `rand` `guess` `snake`
 
 ## Features
 
 - Multiboot + VGA/serial console
 - IRQ timer (PIT) and keyboard
-- CMOS RTC clock
-- Kernel heap (`kmalloc`)
-- RAM filesystem
-- PC speaker beep
-- Number-guessing game
+- CMOS RTC, kernel log, PCI scan
+- Kernel heap and RAM filesystem
+- Scripts via `run`, variables, snake game

@@ -8,8 +8,9 @@
 static volatile int kbd_buf[KBD_BUF_SIZE];
 static volatile unsigned int kbd_head;
 static volatile unsigned int kbd_tail;
-static int shift_pressed;
-static int extended;
+static volatile int shift_pressed;
+static volatile int extended;
+static volatile int irqs_live;
 
 static const char scancode_set1[] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -48,7 +49,7 @@ static int kbd_pop(void)
 static char scancode_to_ascii(uint8_t scancode)
 {
     if (scancode & 0x80)
-        return 0;
+        return 0; /* ignore break codes */
     if (scancode >= sizeof(scancode_set1))
         return 0;
     if (shift_pressed)
@@ -65,6 +66,9 @@ static void handle_scancode(uint8_t scancode)
 
     if (extended) {
         extended = 0;
+        /* Ignore break codes for extended keys */
+        if (scancode & 0x80)
+            return;
         if (scancode == 0x48)
             kbd_push(KEY_UP);
         else if (scancode == 0x50)
@@ -92,51 +96,32 @@ void keyboard_init(void)
     kbd_tail = 0;
     shift_pressed = 0;
     extended = 0;
+    irqs_live = 0;
     while (inb(0x64) & 1)
         (void)inb(0x60);
 }
 
-void keyboard_irq_handler(void)
+void keyboard_enable_irq_mode(void)
 {
-    if (!(inb(0x64) & 1))
-        return;
-    handle_scancode(inb(0x60));
+    irqs_live = 1;
+    /* Drop any pending bytes so IRQ + leftover data can't double-fire */
+    while (inb(0x64) & 1)
+        (void)inb(0x60);
+    kbd_head = 0;
+    kbd_tail = 0;
 }
 
-static int poll_keyboard_legacy(void)
+void keyboard_irq_handler(void)
 {
-    if (!(inb(0x64) & 1))
-        return 0;
-    uint8_t sc = inb(0x60);
-    if (sc == 0xE0) {
-        extended = 1;
-        return 0;
-    }
-    if (extended) {
-        extended = 0;
-        if (sc == 0x48)
-            return KEY_UP;
-        if (sc == 0x50)
-            return KEY_DOWN;
-        return 0;
-    }
-    if (sc == 0x2A || sc == 0x36) {
-        shift_pressed = 1;
-        return 0;
-    }
-    if (sc == 0xAA || sc == 0xB6) {
-        shift_pressed = 0;
-        return 0;
-    }
-    return (unsigned char)scancode_to_ascii(sc);
+    /* Always drain the controller; only the IRQ path may read port 0x60
+       once IRQs are live (avoids double characters from IRQ + polling). */
+    while (inb(0x64) & 1)
+        handle_scancode(inb(0x60));
 }
 
 int keyboard_read_code(void)
 {
-    int c = kbd_pop();
-    if (c)
-        return c;
-    return poll_keyboard_legacy();
+    return kbd_pop();
 }
 
 static int poll_serial_char(void)
@@ -151,8 +136,12 @@ static int poll_serial_char(void)
 
 void input_drain(void)
 {
-    while (keyboard_read_code())
+    while (kbd_pop())
         ;
+    if (!irqs_live) {
+        while (inb(0x64) & 1)
+            (void)inb(0x60);
+    }
     while (serial_received())
         (void)serial_read();
     shift_pressed = 0;

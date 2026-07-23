@@ -45,6 +45,7 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     idt_init();
     timer_init(100);
     irq_install();
+    keyboard_enable_irq_mode();
     klog("boot: idt/timer/irqs online");
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));

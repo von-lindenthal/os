@@ -145,3 +145,123 @@ void game_snake(void)
     terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     input_drain();
 }
+
+void game_dice(void)
+{
+    unsigned int n = (timer_ticks() * 2654435761u) % 6u + 1u;
+    writestring("You rolled: ");
+    write_dec(n);
+    writestring("\n");
+    speaker_beep(600 + n * 40, 6);
+}
+
+void game_hangman(void)
+{
+    static const char *words[] = {
+        "kernel", "qemu", "memory", "shell", "interrupt",
+        "pixel", "driver", "thread", "binary", "socket"
+    };
+    unsigned int wi = timer_ticks() % 10u;
+    const char *word = words[wi];
+    char shown[32];
+    size_t wlen = strlen(word);
+    for (size_t i = 0; i < wlen; i++)
+        shown[i] = '_';
+    shown[wlen] = '\0';
+
+    int lives = 6;
+    char guessed[32];
+    size_t gcount = 0;
+    guessed[0] = '\0';
+
+    writestring("Hangman! Type letters. q quits.\n");
+
+    while (lives > 0) {
+        writestring("Word: ");
+        for (size_t i = 0; i < wlen; i++) {
+            putchar(shown[i]);
+            putchar(' ');
+        }
+        writestring("  lives=");
+        write_dec((unsigned int)lives);
+        writestring("\nletter> ");
+
+        char buf[8];
+        size_t n = 0;
+        for (;;) {
+            int c = getchar_code();
+            if (c == '\n') {
+                putchar('\n');
+                break;
+            }
+            if (c == '\b') {
+                if (n > 0) {
+                    n--;
+                    putchar('\b');
+                }
+                continue;
+            }
+            if (c >= 32 && c < 256 && n < sizeof(buf) - 1) {
+                buf[n++] = (char)c;
+                putchar((char)c);
+            }
+        }
+        buf[n] = '\0';
+        if (buf[0] == 'q' && buf[1] == '\0') {
+            writestring("quit\n");
+            return;
+        }
+        if (n != 1 || buf[0] < 'a' || buf[0] > 'z') {
+            if (n == 1 && buf[0] >= 'A' && buf[0] <= 'Z')
+                buf[0] = (char)(buf[0] - 'A' + 'a');
+            else {
+                writestring("type one letter\n");
+                continue;
+            }
+        }
+
+        char ch = buf[0];
+        int already = 0;
+        for (size_t i = 0; i < gcount; i++) {
+            if (guessed[i] == ch)
+                already = 1;
+        }
+        if (already) {
+            writestring("already guessed\n");
+            continue;
+        }
+        if (gcount < sizeof(guessed) - 1)
+            guessed[gcount++] = ch;
+
+        int hit = 0;
+        for (size_t i = 0; i < wlen; i++) {
+            if (word[i] == ch) {
+                shown[i] = ch;
+                hit = 1;
+            }
+        }
+        if (!hit) {
+            lives--;
+            writestring("miss\n");
+            speaker_beep(200, 6);
+        } else {
+            writestring("hit\n");
+            speaker_beep(800, 4);
+        }
+
+        int done = 1;
+        for (size_t i = 0; i < wlen; i++) {
+            if (shown[i] == '_')
+                done = 0;
+        }
+        if (done) {
+            writestring("You win! Word was ");
+            writestring(word);
+            writestring("\n");
+            return;
+        }
+    }
+    writestring("You lose. Word was ");
+    writestring(word);
+    writestring("\n");
+}

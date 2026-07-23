@@ -12,6 +12,8 @@
 #include "klog.h"
 #include "pci.h"
 #include "game.h"
+#include "gfx.h"
+#include "auth.h"
 #include <stdint.h>
 
 #define INPUT_MAX 78
@@ -19,6 +21,7 @@
 #define VAR_MAX 8
 #define VAR_NAME 24
 #define VAR_VAL 48
+#define ALIAS_MAX 8
 
 static struct multiboot_info *g_mb;
 static char history[8][79];
@@ -28,6 +31,9 @@ static char var_names[VAR_MAX][VAR_NAME];
 static char var_vals[VAR_MAX][VAR_VAL];
 static int var_count;
 static int script_depth;
+static char alias_names[ALIAS_MAX][VAR_NAME];
+static char alias_vals[ALIAS_MAX][INPUT_MAX + 1];
+static int alias_count;
 
 static void qemu_exit(uint8_t status)
 {
@@ -44,13 +50,6 @@ static void reboot(void)
     qemu_exit(0x10);
     for (;;)
         hlt();
-}
-
-static void print_prompt(void)
-{
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
-    writestring("os> ");
-    terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 }
 
 static void ls_callback(const char *name, size_t len)
@@ -129,20 +128,29 @@ static void pad2(unsigned int v)
 
 static void cmd_help(void)
 {
-    writestring("System:  help about clear date time uptime ticks sleep\n");
-    writestring("         mem free cpu sysinfo bench dmesg lspci\n");
-    writestring("         beep color reboot halt shutdown\n");
-    writestring("Files:   ls df cat head wc hexdump touch write append\n");
-    writestring("         rm cp mv find run\n");
-    writestring("Vars:    set name=value  get name  vars\n");
-    writestring("Misc:    echo calc peek history !! rand guess snake\n");
+    writestring("System:  help about sysinfo clear date time uptime ticks\n");
+    writestring("         sleep mem free cpu bench dmesg lspci beep color\n");
+    writestring("         reboot halt shutdown login logout whoami passwd\n");
+    writestring("Files:   ls df cat head wc hexdump grep diff sum touch\n");
+    writestring("         write append rm cp mv find run edit\n");
+    writestring("Vars:    set get vars alias\n");
+    writestring("Fun:     echo calc peek history rand fortune play gfx\n");
+    writestring("Games:   guess snake hangman dice\n");
     writestring("Tips:    Up-arrow recalls previous command\n");
 }
 
 static void cmd_about(void)
 {
-    writestring("os 0.4 — freestanding x86 kernel\n");
-    writestring("IRQs, PIT, RTC, heap, RAM fs, PCI, klog, games\n");
+    writestring("os 0.5 — freestanding x86 kernel\n");
+    writestring("IRQs, RTC, heap, RAM fs, PCI, klog, gfx, games, auth\n");
+}
+
+static void print_prompt(void)
+{
+    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    writestring(auth_user());
+    writestring("@os> ");
+    terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 }
 
 static void cmd_date(void)
@@ -652,6 +660,31 @@ static void handle_command(char *line)
 
     hist_add(line);
 
+    /* Alias expansion for the first token only */
+    {
+        char tmp[INPUT_MAX + 1];
+        strcpy(tmp, line);
+        char *tr = tmp;
+        char *tcmd = next_token(&tr);
+        for (int i = 0; i < alias_count; i++) {
+            if (strcmp(tcmd, alias_names[i]) == 0) {
+                char expanded[INPUT_MAX + 1];
+                size_t el = strlen(alias_vals[i]);
+                if (el >= INPUT_MAX)
+                    break;
+                strcpy(expanded, alias_vals[i]);
+                if (*tr) {
+                    if (el + 1 + strlen(tr) >= INPUT_MAX)
+                        break;
+                    expanded[el] = ' ';
+                    strcpy(expanded + el + 1, tr);
+                }
+                handle_command(expanded);
+                return;
+            }
+        }
+    }
+
     char *rest = line;
     char *cmd = next_token(&rest);
 
@@ -990,6 +1023,268 @@ static void handle_command(char *line)
         game_snake();
         return;
     }
+    if (strcmp(cmd, "hangman") == 0) {
+        game_hangman();
+        return;
+    }
+    if (strcmp(cmd, "dice") == 0) {
+        game_dice();
+        return;
+    }
+    if (strcmp(cmd, "gfx") == 0) {
+        gfx_demo();
+        return;
+    }
+    if (strcmp(cmd, "play") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            writestring("usage: play <notes>  e.g. play c d e c\n");
+            return;
+        }
+        speaker_play_notes(rest);
+        writestring("done\n");
+        return;
+    }
+    if (strcmp(cmd, "fortune") == 0) {
+        static const char *quotes[] = {
+            "It boots, therefore it is.",
+            "There is no cloud, just someone else's mainframe.",
+            "Segmentation fault: core dumped... just kidding.",
+            "Have you tried turning it off and on again?",
+            "In URAM, nobody can hear you segfault."
+        };
+        writestring(quotes[rand_u32() % 5u]);
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "whoami") == 0) {
+        writestring(auth_user());
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "login") == 0) {
+        char *user = next_token(&rest);
+        char *pass = next_token(&rest);
+        if (!*user) {
+            writestring("usage: login <user> [pass]  (default pass: os)\n");
+            return;
+        }
+        if (!*pass)
+            pass = "os";
+        int rc = auth_login(user, pass);
+        if (rc == -2)
+            writestring("bad password\n");
+        else if (rc != 0)
+            writestring("login failed\n");
+        else
+            writestring("welcome\n");
+        return;
+    }
+    if (strcmp(cmd, "logout") == 0) {
+        auth_logout();
+        writestring("logged out\n");
+        return;
+    }
+    if (strcmp(cmd, "passwd") == 0) {
+        char *pass = next_token(&rest);
+        if (!*pass) {
+            writestring("usage: passwd <newpass>\n");
+            return;
+        }
+        if (auth_set_pass(pass) != 0)
+            writestring("failed\n");
+        else
+            writestring("password updated\n");
+        return;
+    }
+    if (strcmp(cmd, "grep") == 0) {
+        char *pat = next_token(&rest);
+        char *name = next_token(&rest);
+        if (!*pat || !*name) {
+            writestring("usage: grep <pattern> <file>\n");
+            return;
+        }
+        char buf[FS_DATA_MAX];
+        size_t len = 0;
+        if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+            writestring("file not found\n");
+            return;
+        }
+        size_t i = 0;
+        int hits = 0;
+        while (i < len) {
+            char line[INPUT_MAX + 1];
+            size_t n = 0;
+            while (i < len && buf[i] != '\n' && n < INPUT_MAX)
+                line[n++] = buf[i++];
+            if (i < len && buf[i] == '\n')
+                i++;
+            line[n] = '\0';
+            for (size_t a = 0; line[a]; a++) {
+                size_t b = 0;
+                while (pat[b] && line[a + b] == pat[b])
+                    b++;
+                if (!pat[b]) {
+                    writestring(line);
+                    writestring("\n");
+                    hits++;
+                    break;
+                }
+            }
+        }
+        if (!hits)
+            writestring("(no matches)\n");
+        return;
+    }
+    if (strcmp(cmd, "diff") == 0) {
+        char *a = next_token(&rest);
+        char *b = next_token(&rest);
+        if (!*a || !*b) {
+            writestring("usage: diff <file1> <file2>\n");
+            return;
+        }
+        char ba[FS_DATA_MAX], bb[FS_DATA_MAX];
+        size_t la = 0, lb = 0;
+        if (fs_read(a, ba, sizeof(ba), &la) != 0 || fs_read(b, bb, sizeof(bb), &lb) != 0) {
+            writestring("file not found\n");
+            return;
+        }
+        if (la == lb && memcmp(ba, bb, la) == 0) {
+            writestring("files identical\n");
+            return;
+        }
+        writestring("files differ (");
+        write_dec((unsigned int)la);
+        writestring(" vs ");
+        write_dec((unsigned int)lb);
+        writestring(" bytes)\n");
+        return;
+    }
+    if (strcmp(cmd, "sum") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: sum <file>\n");
+            return;
+        }
+        char buf[FS_DATA_MAX];
+        size_t len = 0;
+        if (fs_read(name, buf, sizeof(buf), &len) != 0) {
+            writestring("file not found\n");
+            return;
+        }
+        uint32_t s = 0;
+        for (size_t i = 0; i < len; i++)
+            s = (s * 33u) + (uint8_t)buf[i];
+        writestring("0x");
+        write_u32(s, 16);
+        writestring("  ");
+        write_dec((unsigned int)len);
+        putchar(' ');
+        writestring(name);
+        writestring("\n");
+        return;
+    }
+    if (strcmp(cmd, "edit") == 0) {
+        char *name = next_token(&rest);
+        if (!*name) {
+            writestring("usage: edit <file>  (end with a single '.' line)\n");
+            return;
+        }
+        writestring("Editing ");
+        writestring(name);
+        writestring(". Enter lines, '.' alone to save.\n");
+        char content[FS_DATA_MAX];
+        size_t clen = 0;
+        content[0] = '\0';
+        for (;;) {
+            writestring("* ");
+            char line[INPUT_MAX + 1];
+            size_t n = 0;
+            for (;;) {
+                int c = getchar_code();
+                if (c == '\n') {
+                    putchar('\n');
+                    break;
+                }
+                if (c == '\b') {
+                    if (n > 0) {
+                        n--;
+                        putchar('\b');
+                    }
+                    continue;
+                }
+                if (c >= 32 && c < 256 && n < INPUT_MAX)
+                    line[n++] = (char)c, putchar((char)c);
+            }
+            line[n] = '\0';
+            if (strcmp(line, ".") == 0)
+                break;
+            size_t need = n + 1;
+            if (clen + need >= FS_DATA_MAX) {
+                writestring("file too large\n");
+                break;
+            }
+            memcpy(content + clen, line, n);
+            clen += n;
+            content[clen++] = '\n';
+            content[clen] = '\0';
+        }
+        if (fs_create(name) == -2) {
+            writestring("filesystem full\n");
+            return;
+        }
+        if (fs_write(name, content) != 0)
+            writestring("write failed\n");
+        else
+            writestring("saved\n");
+        return;
+    }
+    if (strcmp(cmd, "alias") == 0) {
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            if (alias_count == 0) {
+                writestring("(none)\n");
+                return;
+            }
+            for (int i = 0; i < alias_count; i++) {
+                writestring(alias_names[i]);
+                writestring("='");
+                writestring(alias_vals[i]);
+                writestring("'\n");
+            }
+            return;
+        }
+        char *eq = rest;
+        while (*eq && *eq != '=')
+            eq++;
+        if (!*eq) {
+            writestring("usage: alias name=command\n");
+            return;
+        }
+        *eq = '\0';
+        if (strlen(rest) >= VAR_NAME || strlen(eq + 1) >= INPUT_MAX) {
+            writestring("too long\n");
+            return;
+        }
+        for (int i = 0; i < alias_count; i++) {
+            if (strcmp(alias_names[i], rest) == 0) {
+                strcpy(alias_vals[i], eq + 1);
+                writestring("ok\n");
+                return;
+            }
+        }
+        if (alias_count >= ALIAS_MAX) {
+            writestring("too many aliases\n");
+            return;
+        }
+        strcpy(alias_names[alias_count], rest);
+        strcpy(alias_vals[alias_count], eq + 1);
+        alias_count++;
+        writestring("ok\n");
+        return;
+    }
     if (strcmp(cmd, "calc") == 0) {
         cmd_calc(rest);
         return;
@@ -1058,8 +1353,10 @@ void shell_run(struct multiboot_info *mb)
     g_mb = mb;
     hist_count = 0;
     var_count = 0;
+    alias_count = 0;
     script_depth = 0;
     rng_state = timer_ticks() ^ 0xC0FFEEu;
+    auth_init();
 
     print_prompt();
 

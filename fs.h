@@ -3,9 +3,9 @@
 
 #include <stddef.h>
 
-#define FS_MAX_FILES 16
+#define FS_MAX_FILES 24
 #define FS_NAME_MAX  28
-#define FS_DATA_MAX  512
+#define FS_DATA_MAX  1024
 
 void fs_init(void);
 int fs_create(const char *name);

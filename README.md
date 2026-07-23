@@ -9,7 +9,7 @@ Invoke-WebRequest -Uri "https://github.com/von-lindenthal/os/raw/main/kernel.elf
 & "C:\Program Files\qemu\qemu-system-i386.exe" -kernel .\kernel.elf
 ```
 
-Click the QEMU window, then type at `os>`.
+Click the QEMU window, then type at `guest@os>`.
 
 ## Build
 
@@ -18,20 +18,13 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
 make && make run
 ```
 
-## Commands
+## Highlights (0.5)
 
-**System:** `help` `about` `sysinfo` `clear` `date` `time` `uptime` `ticks` `sleep` `mem` `free` `cpu` `bench` `dmesg` `lspci` `beep` `color` `reboot` `halt` `shutdown`
+- Login/auth (`login`, `whoami`, `passwd`)
+- Graphics demo (`gfx`) and music (`play c d e`)
+- Games: `snake`, `hangman`, `dice`, `guess`
+- Files: `grep`, `diff`, `sum`, `edit`, `run`
+- Aliases and variables
+- PCI, dmesg, RTC, heap, RAM filesystem
 
-**Files:** `ls` `df` `cat` `head` `wc` `hexdump` `touch` `write` `append` `rm` `cp` `mv` `find` `run`
-
-**Vars:** `set name=value` `get name` `vars` `echo $name`
-
-**Misc:** `echo` `calc` `peek` `history` `!!` `rand` `guess` `snake`
-
-## Features
-
-- Multiboot + VGA/serial console
-- IRQ timer (PIT) and keyboard
-- CMOS RTC, kernel log, PCI scan
-- Kernel heap and RAM filesystem
-- Scripts via `run`, variables, snake game
+Type `help` for the full command list.

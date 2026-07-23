@@ -7,6 +7,7 @@
 #include "shell.h"
 #include "heap.h"
 #include "klog.h"
+#include "auth.h"
 #include "io.h"
 #include <stdint.h>
 
@@ -16,10 +17,11 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     keyboard_init();
     heap_init();
     klog_init();
+    auth_init();
     fs_init();
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    writestring("os 0.4 booting...\n");
+    writestring("os 0.5 booting...\n");
     klog("boot: kernel_main entered");
 
     if (magic != MULTIBOOT_MAGIC) {
@@ -46,7 +48,7 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     klog("boot: idt/timer/irqs online");
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-    writestring("Timer, keyboard, heap, RTC, PCI, klog ready.\n");
+    writestring("Timer, keyboard, heap, RTC, PCI, gfx, auth ready.\n");
     writestring("Type 'help'. Click the QEMU window to type.\n\n");
     klog("boot: shell starting");
 

@@ -12,7 +12,7 @@ OBJS = boot.o irq.o gdt.o string.o terminal.o keyboard.o idt.o timer.o \
        ata.o net.o panic.o shell.o kernel.o
 KERNEL = kernel.elf
 
-.PHONY: all clean run run-serial test-shell
+.PHONY: all clean run run-serial test-shell test-bugs
 
 all: $(KERNEL)
 
@@ -53,6 +53,9 @@ test-shell: $(KERNEL)
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
 		-nic none \
 		-no-reboot || [ $$? -eq 33 ]
+
+test-bugs: $(KERNEL)
+	@bash scripts/bugfix-test.sh
 
 clean:
 	rm -f $(OBJS) $(KERNEL)

@@ -747,8 +747,6 @@ static void cmd_head(const char *name, unsigned int nlines)
         writestring("file not found\n");
         return;
     }
-    if (nlines == 0)
-        nlines = 10;
     unsigned int shown = 0;
     for (size_t i = 0; i < len && shown < nlines; i++) {
         putchar(buf[i]);
@@ -838,7 +836,7 @@ static void handle_command(char *line)
         return;
     while (*line == ' ')
         line++;
-    if (*line == '\0')
+    if (*line == '\0' || *line == '#')
         return;
     if (strnlen(line, INPUT_MAX + 2) > INPUT_MAX) {
         writestring("line too long\n");
@@ -949,6 +947,10 @@ static void handle_command(char *line)
         }
         const char *p = rest;
         unsigned int n = parse_uint(&p);
+        if (n > 300u) {
+            writestring("max sleep is 300 seconds\n");
+            return;
+        }
         writestring("sleeping...\n");
         timer_sleep(n * 100);
         writestring("done\n");
@@ -1156,7 +1158,7 @@ static void handle_command(char *line)
             return;
         }
         if (var_unset(name) != 0)
-            writestring("(unset)\n");
+            writestring("not found\n");
         else
             writestring("ok\n");
         return;
@@ -1343,7 +1345,8 @@ static void handle_command(char *line)
             return;
         }
         int is_p = 1;
-        for (unsigned int d = 2; d * d <= n; d++) {
+        /* Use d <= n/d to avoid unsigned overflow of d*d on large n. */
+        for (unsigned int d = 2; d <= n / d; d++) {
             if (n % d == 0) {
                 is_p = 0;
                 break;
@@ -1429,6 +1432,10 @@ static void handle_command(char *line)
         size_t len = 0;
         if (fs_read(name, buf, sizeof(buf), &len) != 0) {
             writestring("file not found\n");
+            return;
+        }
+        if (want == 0) {
+            writestring("\n");
             return;
         }
         /* Count lines, find start */
@@ -1541,6 +1548,10 @@ static void handle_command(char *line)
         return;
     }
     if (strcmp(cmd, "passwd") == 0) {
+        if (!auth_is_logged_in()) {
+            writestring("login required\n");
+            return;
+        }
         char *pass = next_token(&rest);
         if (!*pass) {
             writestring("usage: passwd <newpass>\n");

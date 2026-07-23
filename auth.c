@@ -17,6 +17,11 @@ const char *auth_user(void)
     return logged_in ? current_user : "guest";
 }
 
+int auth_is_logged_in(void)
+{
+    return logged_in;
+}
+
 int auth_login(const char *user, const char *pass)
 {
     if (!user || !user[0] || strlen(user) >= sizeof(current_user))

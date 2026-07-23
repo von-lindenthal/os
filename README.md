@@ -26,4 +26,11 @@ make && make run
 - Ctrl+L clear, Ctrl+U kill line, Ctrl+C cancel
 - Games, PCI/ATA/net scan, themes, RTC, speaker
 
+## Tests
+
+```bash
+make test-shell   # general shell smoke
+make test-bugs    # edge-case / bugfix regressions
+```
+
 Type `help` for commands.

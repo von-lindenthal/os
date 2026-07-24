@@ -133,6 +133,8 @@ void putchar(char c)
 
 void writestring(const char *data)
 {
+    if (!data)
+        return;
     for (size_t i = 0; data[i]; i++)
         putchar(data[i]);
 }

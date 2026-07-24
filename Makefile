@@ -12,7 +12,7 @@ OBJS = boot.o irq.o gdt.o string.o terminal.o keyboard.o idt.o timer.o \
        ata.o net.o panic.o shell.o kernel.o
 KERNEL = kernel.elf
 
-.PHONY: all clean run run-serial test-shell test-bugs
+.PHONY: all clean run run-serial test-shell test-bugs test-more
 
 all: $(KERNEL)
 
@@ -56,6 +56,9 @@ test-shell: $(KERNEL)
 
 test-bugs: $(KERNEL)
 	@bash scripts/bugfix-test.sh
+
+test-more: $(KERNEL)
+	@bash scripts/keep-testing.sh
 
 clean:
 	rm -f $(OBJS) $(KERNEL)

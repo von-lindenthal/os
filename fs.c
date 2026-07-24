@@ -27,6 +27,8 @@ void fs_init(void)
 
 static struct file *fs_find(const char *name)
 {
+    if (!name || !name[0])
+        return 0;
     for (int i = 0; i < FS_MAX_FILES; i++) {
         if (files[i].used && strcmp(files[i].name, name) == 0)
             return &files[i];
@@ -74,14 +76,15 @@ int fs_write(const char *name, const char *data)
     if (!f)
         return -1;
 
-    size_t n = strlen(data);
+    size_t want = strlen(data);
+    size_t n = want;
     if (n >= FS_DATA_MAX)
         n = FS_DATA_MAX - 1;
 
     memcpy(f->data, data, n);
     f->data[n] = '\0';
     f->len = n;
-    return 0;
+    return (n < want) ? -3 : 0; /* -3 truncated */
 }
 
 int fs_append(const char *name, const char *data)
@@ -91,17 +94,21 @@ int fs_append(const char *name, const char *data)
     struct file *f = fs_find(name);
     if (!f)
         return -1;
-    if (f->len >= FS_DATA_MAX - 1)
-        return 0;
 
-    size_t add = strlen(data);
+    size_t want = strlen(data);
+    if (want == 0)
+        return 0;
+    if (f->len >= FS_DATA_MAX - 1)
+        return -3;
+
+    size_t add = want;
     size_t room = (FS_DATA_MAX - 1) - f->len;
     if (add > room)
         add = room;
     memcpy(f->data + f->len, data, add);
     f->len += add;
     f->data[f->len] = '\0';
-    return 0;
+    return (add < want) ? -3 : 0;
 }
 
 int fs_read(const char *name, char *out, size_t out_size, size_t *out_len)
@@ -136,6 +143,10 @@ int fs_rename(const char *old_name, const char *new_name)
     struct file *f = fs_find(old_name);
     if (!f)
         return -1;
+    if (!new_name)
+        return -2;
+    if (strcmp(old_name, new_name) == 0)
+        return 0;
     if (!is_valid_name(new_name, FS_NAME_MAX))
         return -2;
     if (fs_find(new_name))
@@ -148,10 +159,14 @@ int fs_copy(const char *src, const char *dst)
 {
     if (!src || !dst)
         return -1;
+    if (strcmp(src, dst) == 0)
+        return 0;
     struct file *f = fs_find(src);
     if (!f)
         return -1;
-    if (fs_create(dst) < 0 && !fs_find(dst))
+    if (fs_exists(dst))
+        return -3; /* refuse overwrite */
+    if (fs_create(dst) < 0)
         return -2;
     return fs_write(dst, f->data);
 }
@@ -188,5 +203,5 @@ size_t fs_used_bytes(void)
 
 size_t fs_capacity_bytes(void)
 {
-    return (size_t)FS_MAX_FILES * FS_DATA_MAX;
+    return (size_t)FS_MAX_FILES * (FS_DATA_MAX - 1);
 }

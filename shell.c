@@ -42,6 +42,7 @@ static size_t clip_len;
 static uint32_t sw_start_ticks;
 static int sw_running;
 static uint32_t sw_elapsed;
+static int call_depth;
 
 static void qemu_exit(uint8_t status)
 {
@@ -366,6 +367,30 @@ static void cmd_peek(const char *arg)
     writestring("|\n");
 }
 
+static int calc_parse_int(const char **pp, int *out)
+{
+    const char *p = *pp;
+    int neg = 0;
+    if (*p == '-') {
+        neg = 1;
+        p++;
+    }
+    if (*p < '0' || *p > '9')
+        return -1;
+    unsigned int a = parse_uint(&p);
+    if (neg) {
+        if (a > 2147483648u)
+            return -2;
+        *out = (a == 2147483648u) ? (int)0x80000000 : -(int)a;
+    } else {
+        if (a > 2147483647u)
+            return -2;
+        *out = (int)a;
+    }
+    *pp = p;
+    return 0;
+}
+
 static void cmd_calc(const char *expr)
 {
     while (*expr == ' ')
@@ -376,36 +401,61 @@ static void cmd_calc(const char *expr)
     }
 
     const char *p = expr;
-    int neg = 0;
-    if (*p == '-') {
-        neg = 1;
-        p++;
+    int ia = 0, ib = 0;
+    if (calc_parse_int(&p, &ia) != 0) {
+        writestring("invalid number\n");
+        return;
     }
-    unsigned int a = parse_uint(&p);
-    int ia = neg ? -(int)a : (int)a;
     while (*p == ' ')
         p++;
+    if (!*p) {
+        writestring("usage: calc <a> <+|-|*|/> <b>\n");
+        return;
+    }
     char op = *p++;
     while (*p == ' ')
         p++;
-    neg = 0;
-    if (*p == '-') {
-        neg = 1;
-        p++;
+    if (calc_parse_int(&p, &ib) != 0) {
+        writestring("invalid number\n");
+        return;
     }
-    unsigned int b = parse_uint(&p);
-    int ib = neg ? -(int)b : (int)b;
 
     int result = 0;
-    if (op == '+')
+    if (op == '+') {
+        if ((ib > 0 && ia > 2147483647 - ib) ||
+            (ib < 0 && ia < (int)0x80000000 - ib)) {
+            writestring("overflow\n");
+            return;
+        }
         result = ia + ib;
-    else if (op == '-')
+    } else if (op == '-') {
+        if ((ib < 0 && ia > 2147483647 + ib) ||
+            (ib > 0 && ia < (int)0x80000000 + ib)) {
+            writestring("overflow\n");
+            return;
+        }
         result = ia - ib;
-    else if (op == '*')
+    } else if (op == '*') {
+        if (ia != 0 && ib != 0) {
+            if (ia == (int)0x80000000 || ib == (int)0x80000000) {
+                writestring("overflow\n");
+                return;
+            }
+            int aa = ia < 0 ? -ia : ia;
+            int bb = ib < 0 ? -ib : ib;
+            if (aa > 2147483647 / bb) {
+                writestring("overflow\n");
+                return;
+            }
+        }
         result = ia * ib;
-    else if (op == '/') {
+    } else if (op == '/') {
         if (ib == 0) {
             writestring("divide by zero\n");
+            return;
+        }
+        if (ia == (int)0x80000000 && ib == -1) {
+            writestring("overflow\n");
             return;
         }
         result = ia / ib;
@@ -604,13 +654,18 @@ static void cmd_sort(const char *name)
     }
     char *lines[64];
     int n = 0;
+    int truncated = 0;
     size_t i = 0;
-    while (i < len && n < 64) {
-        lines[n++] = &buf[i];
+    while (i < len) {
+        char *start = &buf[i];
         while (i < len && buf[i] != '\n')
             i++;
         if (i < len)
             buf[i++] = '\0';
+        if (n < 64)
+            lines[n++] = start;
+        else
+            truncated = 1;
     }
     for (int a = 0; a + 1 < n; a++) {
         for (int b = a + 1; b < n; b++) {
@@ -625,6 +680,8 @@ static void cmd_sort(const char *name)
         writestring(lines[k]);
         writestring("\n");
     }
+    if (truncated)
+        writestring("(sort truncated to 64 lines)\n");
 }
 
 static void cmd_uniq(const char *name)
@@ -641,11 +698,20 @@ static void cmd_uniq(const char *name)
     while (i < len) {
         char line[96];
         size_t j = 0;
-        while (i < len && buf[i] != '\n' && j + 1 < sizeof(line))
-            line[j++] = buf[i++];
-        line[j] = '\0';
+        int overflow = 0;
+        while (i < len && buf[i] != '\n') {
+            if (j + 1 < sizeof(line))
+                line[j++] = buf[i++];
+            else {
+                overflow = 1;
+                i++;
+            }
+        }
         if (i < len && buf[i] == '\n')
             i++;
+        line[j] = '\0';
+        if (overflow)
+            continue;
         if (strcmp(line, prev) != 0) {
             writestring(line);
             writestring("\n");
@@ -797,10 +863,11 @@ static void shutdown_qemu(void)
 }
 
 static void handle_command(char *line);
+static void handle_command_body(char *line);
 
 static void cmd_run(const char *name)
 {
-    if (script_depth > 3) {
+    if (script_depth >= 2) {
         writestring("script nesting too deep\n");
         return;
     }
@@ -815,11 +882,22 @@ static void cmd_run(const char *name)
     while (i < len) {
         char line[INPUT_MAX + 1];
         size_t n = 0;
-        while (i < len && buf[i] != '\n' && n < INPUT_MAX)
-            line[n++] = buf[i++];
+        int overflow = 0;
+        while (i < len && buf[i] != '\n') {
+            if (n < INPUT_MAX)
+                line[n++] = buf[i++];
+            else {
+                overflow = 1;
+                i++;
+            }
+        }
         if (i < len && buf[i] == '\n')
             i++;
         line[n] = '\0';
+        if (overflow) {
+            writestring("script line too long (skipped)\n");
+            continue;
+        }
         if (line[0] == '#' || line[0] == '\0')
             continue;
         writestring("+ ");
@@ -829,6 +907,7 @@ static void cmd_run(const char *name)
     }
     script_depth--;
 }
+
 
 static void handle_command(char *line)
 {
@@ -842,7 +921,17 @@ static void handle_command(char *line)
         writestring("line too long\n");
         return;
     }
+    if (call_depth >= 5) {
+        writestring("command nesting too deep\n");
+        return;
+    }
+    call_depth++;
+    handle_command_body(line);
+    call_depth--;
+}
 
+static void handle_command_body(char *line)
+{
     if (strcmp(line, "!!") == 0) {
         if (hist_count == 0) {
             writestring("no history\n");
@@ -1031,7 +1120,10 @@ static void handle_command(char *line)
         }
         char expanded[FS_DATA_MAX];
         expand_escapes(rest, expanded, sizeof(expanded));
-        if (fs_write(name, expanded) != 0)
+        int wrc = fs_write(name, expanded);
+        if (wrc == -3)
+            writestring("truncated (file full)\n");
+        else if (wrc != 0)
             writestring("write failed\n");
         else
             writestring("ok\n");
@@ -1051,7 +1143,10 @@ static void handle_command(char *line)
         }
         char expanded[FS_DATA_MAX];
         expand_escapes(rest, expanded, sizeof(expanded));
-        if (fs_append(name, expanded) != 0)
+        int arc = fs_append(name, expanded);
+        if (arc == -3)
+            writestring("truncated (file full)\n");
+        else if (arc != 0)
             writestring("append failed\n");
         else
             writestring("ok\n");
@@ -1079,6 +1174,8 @@ static void handle_command(char *line)
         int rc = fs_copy(src, dst);
         if (rc == -1)
             writestring("source not found\n");
+        else if (rc == -3)
+            writestring("destination exists\n");
         else if (rc != 0)
             writestring("copy failed\n");
         else
@@ -1461,14 +1558,18 @@ static void handle_command(char *line)
     if (strcmp(cmd, "cal") == 0) {
         struct rtc_time t;
         rtc_read(&t);
+        int y = (int)t.year;
+        int m = (int)t.month;
+        if (m < 1 || m > 12 || y < 1) {
+            writestring("bad rtc date\n");
+            return;
+        }
         writestring("    ");
         write_dec(t.month);
         putchar('/');
         write_dec(t.year);
         writestring("\nSu Mo Tu We Th Fr Sa\n");
         /* Sakamoto day-of-week for day 1 */
-        int y = (int)t.year;
-        int m = (int)t.month;
         static const int t_vals[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
         int yy = y - (m < 3);
         int dow = (yy + yy / 4 - yy / 100 + yy / 400 + t_vals[m - 1] + 1) % 7;
@@ -1581,11 +1682,20 @@ static void handle_command(char *line)
         while (i < len) {
             char line[INPUT_MAX + 1];
             size_t n = 0;
-            while (i < len && buf[i] != '\n' && n < INPUT_MAX)
-                line[n++] = buf[i++];
+            int overflow = 0;
+            while (i < len && buf[i] != '\n') {
+                if (n < INPUT_MAX)
+                    line[n++] = buf[i++];
+                else {
+                    overflow = 1;
+                    i++;
+                }
+            }
             if (i < len && buf[i] == '\n')
                 i++;
             line[n] = '\0';
+            if (overflow)
+                continue;
             for (size_t a = 0; line[a]; a++) {
                 size_t b = 0;
                 while (pat[b] && line[a + b] == pat[b])

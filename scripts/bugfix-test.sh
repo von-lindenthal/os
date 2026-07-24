@@ -99,6 +99,14 @@ run_cmds /tmp/bf-unset.txt \
   'halt'
 expect /tmp/bf-unset.txt "not found"
 
+echo "=== calc overflow no panic ==="
+run_cmds /tmp/bf-calc.txt \
+  'calc -2147483648 / -1' \
+  'calc 1 + 2' \
+  'halt'
+expect /tmp/bf-calc.txt "overflow"
+expect /tmp/bf-calc.txt "3"
+
 if [ "$fail" -ne 0 ]; then
   echo "BUGFIX TESTS FAILED"
   exit 1

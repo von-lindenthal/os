@@ -154,9 +154,12 @@ void u32toa(unsigned int value, char *buf, int base)
 
 void itoa(int value, char *buf, int base)
 {
+    if (!buf)
+        return;
     if (value < 0 && base == 10) {
         *buf++ = '-';
-        u32toa((unsigned int)(-value), buf, base);
+        /* Avoid UB on INT_MIN: (-INT_MIN) overflows signed int. */
+        u32toa((unsigned int)(-(value + 1)) + 1u, buf, base);
     } else {
         u32toa((unsigned int)value, buf, base);
     }

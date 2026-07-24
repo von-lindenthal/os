@@ -31,6 +31,7 @@ make && make run
 ```bash
 make test-shell   # general shell smoke
 make test-bugs    # edge-case / bugfix regressions
+make test-more    # deeper stress (calc overflow, nest, FS full)
 ```
 
 Type `help` for commands.

@@ -20,6 +20,31 @@ static void draw_cell(int x, int y, char c, uint8_t color)
     vga[vy * 80 + vx] = (uint16_t)((uint16_t)c | ((uint16_t)color << 8));
 }
 
+static int snake_occupies(const int *sx, const int *sy, int len, int x, int y)
+{
+    for (int i = 0; i < len; i++) {
+        if (sx[i] == x && sy[i] == y)
+            return 1;
+    }
+    return 0;
+}
+
+static void place_food(int *fx, int *fy, const int *sx, const int *sy, int len)
+{
+    for (int tries = 0; tries < 256; tries++) {
+        uint32_t t = timer_ticks() + (uint32_t)tries * 17u;
+        int x = 1 + (int)(t % (uint32_t)(GW - 2));
+        int y = 1 + (int)((t / 7u) % (uint32_t)(GH - 2));
+        if (!snake_occupies(sx, sy, len, x, y)) {
+            *fx = x;
+            *fy = y;
+            return;
+        }
+    }
+    *fx = 1;
+    *fy = 1;
+}
+
 void game_snake(void)
 {
     int sx[GW * GH];
@@ -36,6 +61,7 @@ void game_snake(void)
     sy[1] = 5;
     sx[2] = 3;
     sy[2] = 5;
+    place_food(&food_x, &food_y, sx, sy, len);
 
     terminal_clear();
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
@@ -77,10 +103,10 @@ void game_snake(void)
             vga[22 * 80 + col++] =
                 (uint16_t)((uint16_t)nbuf[i] | ((uint16_t)vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK) << 8));
 
-        /* Input (non-blocking for a short window) */
+        /* Input (non-blocking for a short window) — include serial */
         uint32_t start = timer_ticks();
         while (timer_ticks() - start < 8) {
-            int c = keyboard_read_code();
+            int c = input_try_code();
             if (!c)
                 continue;
             if (c == 'q' || c == 'Q') {
@@ -93,10 +119,10 @@ void game_snake(void)
             } else if ((c == 's' || c == 'S' || c == KEY_DOWN) && dy == 0) {
                 dx = 0;
                 dy = 1;
-            } else if ((c == 'a' || c == 'A') && dx == 0) {
+            } else if ((c == 'a' || c == 'A' || c == KEY_LEFT) && dx == 0) {
                 dx = -1;
                 dy = 0;
-            } else if ((c == 'd' || c == 'D') && dx == 0) {
+            } else if ((c == 'd' || c == 'D' || c == KEY_RIGHT) && dx == 0) {
                 dx = 1;
                 dy = 0;
             }
@@ -132,8 +158,7 @@ void game_snake(void)
                 len++;
             score += 10;
             speaker_beep(880, 2);
-            food_x = 1 + (int)(timer_ticks() % (uint32_t)(GW - 2));
-            food_y = 1 + (int)((timer_ticks() / 3) % (uint32_t)(GH - 2));
+            place_food(&food_x, &food_y, sx, sy, len);
         }
     }
 
@@ -178,49 +203,36 @@ void game_hangman(void)
 
     while (lives > 0) {
         writestring("Word: ");
-        for (size_t i = 0; i < wlen; i++) {
-            putchar(shown[i]);
-            putchar(' ');
-        }
+        writestring(shown);
         writestring("  lives=");
         write_dec((unsigned int)lives);
         writestring("\nletter> ");
 
-        char buf[8];
-        size_t n = 0;
+        char ch = 0;
         for (;;) {
             int c = getchar_code();
             if (c == '\n') {
                 putchar('\n');
                 break;
             }
-            if (c == '\b') {
-                if (n > 0) {
-                    n--;
-                    putchar('\b');
-                }
+            if (c == '\b')
                 continue;
-            }
-            if (c >= 32 && c < 256 && n < sizeof(buf) - 1) {
-                buf[n++] = (char)c;
-                putchar((char)c);
+            if (c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+            if (c >= 'a' && c <= 'z') {
+                ch = (char)c;
+                putchar(ch);
             }
         }
-        buf[n] = '\0';
-        if (buf[0] == 'q' && buf[1] == '\0') {
-            writestring("quit\n");
+        if (!ch)
+            continue;
+        if (ch == 'q') {
+            writestring("quit. word was ");
+            writestring(word);
+            writestring("\n");
             return;
         }
-        if (n != 1 || buf[0] < 'a' || buf[0] > 'z') {
-            if (n == 1 && buf[0] >= 'A' && buf[0] <= 'Z')
-                buf[0] = (char)(buf[0] - 'A' + 'a');
-            else {
-                writestring("type one letter\n");
-                continue;
-            }
-        }
 
-        char ch = buf[0];
         int already = 0;
         for (size_t i = 0; i < gcount; i++) {
             if (guessed[i] == ch)
@@ -230,7 +242,7 @@ void game_hangman(void)
             writestring("already guessed\n");
             continue;
         }
-        if (gcount < sizeof(guessed) - 1)
+        if (gcount + 1 < sizeof(guessed))
             guessed[gcount++] = ch;
 
         int hit = 0;
@@ -242,60 +254,47 @@ void game_hangman(void)
         }
         if (!hit) {
             lives--;
+            speaker_beep(220, 4);
             writestring("miss\n");
-            speaker_beep(200, 6);
         } else {
-            writestring("hit\n");
-            speaker_beep(800, 4);
+            speaker_beep(880, 2);
         }
 
-        int done = 1;
-        for (size_t i = 0; i < wlen; i++) {
-            if (shown[i] == '_')
-                done = 0;
-        }
-        if (done) {
-            writestring("You win! Word was ");
+        if (strcmp(shown, word) == 0) {
+            writestring("You win! ");
             writestring(word);
             writestring("\n");
+            speaker_beep(1200, 8);
             return;
         }
     }
-    writestring("You lose. Word was ");
+    writestring("You lose. word was ");
     writestring(word);
     writestring("\n");
 }
 
 void game_rps(void)
 {
-    writestring("Rock-Paper-Scissors! Type r/p/s (q quits).\n");
+    writestring("Rock-Paper-Scissors! Type r/p/s (q quits)\n");
     int wins = 0, losses = 0, draws = 0;
-
     for (;;) {
         writestring("rps> ");
-        char buf[8];
-        size_t n = 0;
+        char ch = 0;
         for (;;) {
             int c = getchar_code();
             if (c == '\n') {
                 putchar('\n');
                 break;
             }
-            if (c == '\b') {
-                if (n > 0) {
-                    n--;
-                    putchar('\b');
-                }
-                continue;
-            }
-            if (c >= 32 && c < 256 && n < sizeof(buf) - 1) {
-                buf[n++] = (char)c;
-                putchar((char)c);
+            if (c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+            if (c == 'r' || c == 'p' || c == 's' || c == 'q') {
+                ch = (char)c;
+                putchar(ch);
             }
         }
-        buf[n] = '\0';
-        if (buf[0] == 'q') {
-            writestring("score W/L/D = ");
+        if (ch == 'q' || !ch) {
+            writestring("score W/L/D ");
             write_dec((unsigned int)wins);
             putchar('/');
             write_dec((unsigned int)losses);
@@ -304,31 +303,24 @@ void game_rps(void)
             writestring("\n");
             return;
         }
-        char you = buf[0];
-        if (you >= 'A' && you <= 'Z')
-            you = (char)(you - 'A' + 'a');
-        if (you != 'r' && you != 'p' && you != 's') {
-            writestring("use r, p, or s\n");
-            continue;
-        }
-
-        char cpu = "rps"[timer_ticks() % 3u];
+        unsigned int cpu = timer_ticks() % 3u;
+        char cpu_ch = (cpu == 0) ? 'r' : (cpu == 1) ? 'p' : 's';
         writestring("cpu=");
-        putchar(cpu);
+        putchar(cpu_ch);
         writestring("  ");
-        if (you == cpu) {
+        if (ch == cpu_ch) {
             writestring("draw\n");
             draws++;
-        } else if ((you == 'r' && cpu == 's') ||
-                   (you == 'p' && cpu == 'r') ||
-                   (you == 's' && cpu == 'p')) {
+        } else if ((ch == 'r' && cpu_ch == 's') ||
+                   (ch == 'p' && cpu_ch == 'r') ||
+                   (ch == 's' && cpu_ch == 'p')) {
             writestring("you win\n");
             wins++;
-            speaker_beep(880, 4);
+            speaker_beep(1000, 4);
         } else {
             writestring("you lose\n");
             losses++;
-            speaker_beep(220, 6);
+            speaker_beep(300, 4);
         }
     }
 }

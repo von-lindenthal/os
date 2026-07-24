@@ -22,7 +22,7 @@ void kernel_main(uint32_t magic, struct multiboot_info *mb)
     fs_init();
 
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
-    writestring("os 0.8 booting...\n");
+    writestring("os 0.9 booting...\n");
     klog("boot: kernel_main entered");
 
     gdt_init();

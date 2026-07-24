@@ -18,13 +18,14 @@ sudo apt install build-essential gcc-multilib nasm qemu-system-x86 make
 make && make run
 ```
 
-## Features (0.8)
+## Features (0.9)
 
-- GDT/IDT faults, panic, bounded strings, safer FS/heap
-- Shell: files, aliases, vars, scripts, clipboard, stopwatch
-- `ps` / `debug`, `sort`/`uniq`/`rev`, `hex`/`base`, `repeat`
-- Ctrl+L clear, Ctrl+U kill line, Ctrl+C cancel
-- Games, PCI/ATA/net scan, themes, RTC, speaker
+- Persistent themes/colors across prompts
+- Safer number parsing (`sleep foo` rejected)
+- Snake: arrow keys, serial input, food never on body
+- Serial ANSI arrows for command history
+- Backspace wraps lines; Tab ignored in the shell
+- Clipboard, stopwatch, ps/debug, games, PCI/ATA/net
 
 ## Tests
 

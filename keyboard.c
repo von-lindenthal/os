@@ -93,6 +93,10 @@ static void handle_scancode(uint8_t scancode)
             kbd_push(KEY_UP);
         else if (code == 0x50)
             kbd_push(KEY_DOWN);
+        else if (code == 0x4B)
+            kbd_push(KEY_LEFT);
+        else if (code == 0x4D)
+            kbd_push(KEY_RIGHT);
         return;
     }
 
@@ -192,11 +196,39 @@ int keyboard_read_code(void)
     return kbd_pop();
 }
 
+static int serial_esc_state;
+
 static int poll_serial_char(void)
 {
     if (!serial_received())
         return 0;
     char c = serial_read();
+
+    if (serial_esc_state == 1) {
+        if (c == '[') {
+            serial_esc_state = 2;
+            return 0;
+        }
+        serial_esc_state = 0;
+        return 0;
+    }
+    if (serial_esc_state == 2) {
+        serial_esc_state = 0;
+        if (c == 'A')
+            return KEY_UP;
+        if (c == 'B')
+            return KEY_DOWN;
+        if (c == 'C')
+            return KEY_RIGHT;
+        if (c == 'D')
+            return KEY_LEFT;
+        return 0;
+    }
+
+    if (c == 27) {
+        serial_esc_state = 1;
+        return 0;
+    }
     if (c == '\r')
         return '\n';
     return (unsigned char)c;
@@ -216,15 +248,21 @@ void input_drain(void)
     key_held = 0;
     last_make = 0;
     last_push_code = 0;
+    serial_esc_state = 0;
+}
+
+int input_try_code(void)
+{
+    int c = keyboard_read_code();
+    if (c)
+        return c;
+    return poll_serial_char();
 }
 
 int getchar_code(void)
 {
     for (;;) {
-        int c = keyboard_read_code();
-        if (c)
-            return c;
-        c = poll_serial_char();
+        int c = input_try_code();
         if (c)
             return c;
         pause();

@@ -49,7 +49,7 @@ run /tmp/kt-nest.txt \
   'halt'
 expect /tmp/kt-nest.txt 'command nesting too deep'
 expect /tmp/kt-nest.txt 'Games:'
-expect /tmp/kt-nest.txt 'Clipboard, stopwatch'
+expect /tmp/kt-nest.txt 'Themes stick'
 expect /tmp/kt-nest.txt 'freestanding'
 
 echo "=== long script line skipped ==="

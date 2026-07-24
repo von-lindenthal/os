@@ -106,6 +106,11 @@ static void terminal_putchar(char c)
             terminal_column--;
             terminal_buffer[terminal_row * VGA_WIDTH + terminal_column] =
                 vga_entry(' ', terminal_color);
+        } else if (terminal_row > 0) {
+            terminal_row--;
+            terminal_column = VGA_WIDTH - 1;
+            terminal_buffer[terminal_row * VGA_WIDTH + terminal_column] =
+                vga_entry(' ', terminal_color);
         }
         return;
     }

@@ -205,7 +205,7 @@ check() {
     fail=1
   fi
 }
-check 'os 0.8'
+check 'os 0.9'
 check 'divide by zero'
 check 'alias recursion limit'
 check 'login required'

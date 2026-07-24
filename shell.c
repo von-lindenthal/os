@@ -43,6 +43,8 @@ static uint32_t sw_start_ticks;
 static int sw_running;
 static uint32_t sw_elapsed;
 static int call_depth;
+static uint8_t shell_color;
+static uint8_t prompt_color;
 
 static void qemu_exit(uint8_t status)
 {
@@ -108,6 +110,24 @@ static unsigned int parse_uint(const char **pp)
     return n;
 }
 
+static int parse_uint_strict(const char *s, unsigned int *out)
+{
+    if (!s || !*s || !out)
+        return -1;
+    while (*s == ' ')
+        s++;
+    if (*s < '0' || *s > '9')
+        return -1;
+    const char *p = s;
+    unsigned int n = parse_uint(&p);
+    while (*p == ' ')
+        p++;
+    if (*p)
+        return -1;
+    *out = n;
+    return 0;
+}
+
 static char *next_token(char **line)
 {
     char *s = *line;
@@ -166,32 +186,32 @@ static void pad2(unsigned int v)
 
 static void cmd_help(void)
 {
-    writestring("System:  help about sysinfo clear date time uptime ticks\n");
-    writestring("         sleep mem free cpu bench dmesg lspci disk net\n");
+    writestring("System:  help about version sysinfo clear date time uptime ticks\n");
+    writestring("         sleep mem free cpu bench dmesg lspci disk net cal\n");
     writestring("         beep color theme reboot halt shutdown debug ps\n");
     writestring("         login logout whoami passwd countdown stopwatch\n");
     writestring("Files:   ls df cat head tail wc hexdump grep diff sum\n");
     writestring("         touch write append rm cp mv find run edit\n");
     writestring("         sort uniq rev copy paste clip yank\n");
     writestring("Vars:    set get unset vars alias unalias env repeat\n");
-    writestring("Fun:     echo calc peek history rand fortune play gfx\n");
-    writestring("         ascii bin hex prime fact motd base\n");
+    writestring("Fun:     echo calc peek history !! rand fortune play gfx\n");
+    writestring("         ascii bin hex prime fact motd base true false\n");
     writestring("Games:   guess snake hangman dice rps\n");
-    writestring("Keys:    Ctrl+L clear  Ctrl+U kill line  Ctrl+C cancel\n");
+    writestring("Keys:    Up/Down history  Ctrl+L clear  Ctrl+U/C line\n");
 }
 
 static void cmd_about(void)
 {
-    writestring("os 0.8 — freestanding x86 kernel\n");
-    writestring("Clipboard, stopwatch, ps/debug, Ctrl keys, safer APIs\n");
+    writestring("os 0.9 — freestanding x86 kernel\n");
+    writestring("Themes stick, safer parsing, snake arrows, serial history\n");
 }
 
 static void print_prompt(void)
 {
-    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    terminal_setcolor(prompt_color);
     writestring(auth_user());
     writestring("@os> ");
-    terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    terminal_setcolor(shell_color);
 }
 
 static void cmd_date(void)
@@ -317,8 +337,8 @@ static void cmd_bench(void)
     writestring(", ticks=");
     write_dec(elapsed);
     writestring(" (~");
-    write_dec(elapsed * 10);
-    writestring(" ms at 100Hz)\n");
+    write_dec(elapsed * (1000u / timer_hz()));
+    writestring(" ms)\n");
 }
 
 static void cmd_peek(const char *arg)
@@ -470,24 +490,33 @@ static void cmd_calc(const char *expr)
     writestring("\n");
 }
 
+static void set_shell_theme(uint8_t body, uint8_t prompt)
+{
+    shell_color = body;
+    prompt_color = prompt;
+    terminal_setcolor(shell_color);
+}
+
 static void cmd_color(const char *arg)
 {
     while (*arg == ' ')
         arg++;
+    uint8_t c;
     if (strcmp(arg, "green") == 0)
-        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+        c = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
     else if (strcmp(arg, "cyan") == 0)
-        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+        c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
     else if (strcmp(arg, "yellow") == 0)
-        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));
+        c = vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK);
     else if (strcmp(arg, "white") == 0)
-        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        c = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
     else if (strcmp(arg, "red") == 0)
-        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+        c = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
     else {
         writestring("usage: color <green|cyan|yellow|white|red>\n");
         return;
     }
+    set_shell_theme(c, c);
     writestring("color set\n");
 }
 
@@ -710,8 +739,10 @@ static void cmd_uniq(const char *name)
         if (i < len && buf[i] == '\n')
             i++;
         line[j] = '\0';
-        if (overflow)
+        if (overflow) {
+            writestring("(line too long, skipped)\n");
             continue;
+        }
         if (strcmp(line, prev) != 0) {
             writestring(line);
             writestring("\n");
@@ -989,7 +1020,7 @@ static void handle_command_body(char *line)
         cmd_help();
         return;
     }
-    if (strcmp(cmd, "about") == 0 || strcmp(cmd, "uname") == 0) {
+    if (strcmp(cmd, "about") == 0 || strcmp(cmd, "uname") == 0 || strcmp(cmd, "version") == 0) {
         cmd_about();
         return;
     }
@@ -1028,20 +1059,18 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "sleep") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: sleep <seconds>\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         if (n > 300u) {
             writestring("max sleep is 300 seconds\n");
             return;
         }
         writestring("sleeping...\n");
-        timer_sleep(n * 100);
+        timer_sleep(n * timer_hz());
         writestring("done\n");
         return;
     }
@@ -1114,9 +1143,16 @@ static void handle_command_body(char *line)
         }
         while (*rest == ' ')
             rest++;
-        if (fs_create(name) == -2) {
-            writestring("filesystem full\n");
-            return;
+        if (!fs_exists(name)) {
+            int crc = fs_create(name);
+            if (crc == -1) {
+                writestring("invalid name\n");
+                return;
+            }
+            if (crc == -2) {
+                writestring("filesystem full\n");
+                return;
+            }
         }
         char expanded[FS_DATA_MAX];
         expand_escapes(rest, expanded, sizeof(expanded));
@@ -1299,9 +1335,9 @@ static void handle_command_body(char *line)
             return;
         }
         unsigned int n = 10;
-        if (*b) {
-            const char *p = b;
-            n = parse_uint(&p);
+        if (*b && parse_uint_strict(b, &n) != 0) {
+            writestring("bad number\n");
+            return;
         }
         cmd_head(a, n);
         return;
@@ -1403,14 +1439,12 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "bin") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: bin <number>\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         writestring("0b");
         if (n == 0) {
             writestring("0\n");
@@ -1429,14 +1463,12 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "prime") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: prime <n>\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         if (n < 2) {
             writestring("not prime\n");
             return;
@@ -1453,14 +1485,12 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "fact") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: fact <n>  (n<=12)\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         if (n > 12) {
             writestring("too large\n");
             return;
@@ -1473,20 +1503,18 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "countdown") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: countdown <seconds>\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         if (n > 60)
             n = 60;
         while (n > 0) {
             write_dec(n);
             writestring("...\n");
-            timer_sleep(100);
+            timer_sleep(timer_hz());
             n--;
         }
         writestring("done!\n");
@@ -1497,15 +1525,20 @@ static void handle_command_body(char *line)
         while (*rest == ' ')
             rest++;
         if (strcmp(rest, "matrix") == 0)
-            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+            set_shell_theme(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK),
+                            vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
         else if (strcmp(rest, "ocean") == 0)
-            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLUE));
+            set_shell_theme(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLUE),
+                            vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE));
         else if (strcmp(rest, "amber") == 0)
-            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));
+            set_shell_theme(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK),
+                            vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));
         else if (strcmp(rest, "danger") == 0)
-            terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+            set_shell_theme(vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK),
+                            vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
         else if (strcmp(rest, "default") == 0)
-            terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+            set_shell_theme(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK),
+                            vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
         else {
             writestring("usage: theme <matrix|ocean|amber|danger|default>\n");
             return;
@@ -1521,9 +1554,9 @@ static void handle_command_body(char *line)
             return;
         }
         unsigned int want = 10;
-        if (*narg) {
-            const char *p = narg;
-            want = parse_uint(&p);
+        if (*narg && parse_uint_strict(narg, &want) != 0) {
+            writestring("bad number\n");
+            return;
         }
         char buf[FS_DATA_MAX];
         size_t len = 0;
@@ -1694,8 +1727,10 @@ static void handle_command_body(char *line)
             if (i < len && buf[i] == '\n')
                 i++;
             line[n] = '\0';
-            if (overflow)
+            if (overflow) {
+                writestring("(line too long, skipped)\n");
                 continue;
+            }
             for (size_t a = 0; line[a]; a++) {
                 size_t b = 0;
                 while (pat[b] && line[a + b] == pat[b])
@@ -2002,14 +2037,12 @@ static void handle_command_body(char *line)
         return;
     }
     if (strcmp(cmd, "hex") == 0) {
-        while (*rest == ' ')
-            rest++;
-        if (!*rest) {
+        char *narg = next_token(&rest);
+        unsigned int n = 0;
+        if (!*narg || parse_uint_strict(narg, &n) != 0) {
             writestring("usage: hex <number>\n");
             return;
         }
-        const char *p = rest;
-        unsigned int n = parse_uint(&p);
         writestring("0x");
         write_u32(n, 16);
         writestring("\n");
@@ -2018,14 +2051,11 @@ static void handle_command_body(char *line)
     if (strcmp(cmd, "base") == 0) {
         char *num = next_token(&rest);
         char *barg = next_token(&rest);
-        if (!*num || !*barg) {
+        unsigned int n = 0, b = 0;
+        if (!*num || !*barg || parse_uint_strict(num, &n) != 0 || parse_uint_strict(barg, &b) != 0) {
             writestring("usage: base <number> <2|8|10|16>\n");
             return;
         }
-        const char *p = num;
-        unsigned int n = parse_uint(&p);
-        const char *bp = barg;
-        unsigned int b = parse_uint(&bp);
         if (b != 2 && b != 8 && b != 10 && b != 16) {
             writestring("bad base\n");
             return;
@@ -2040,9 +2070,8 @@ static void handle_command_body(char *line)
             writestring("usage: repeat <n> <command...>\n");
             return;
         }
-        const char *p = narg;
-        unsigned int n = parse_uint(&p);
-        if (n == 0 || n > 20) {
+        unsigned int n = 0;
+        if (parse_uint_strict(narg, &n) != 0 || n == 0 || n > 20) {
             writestring("n must be 1..20\n");
             return;
         }
@@ -2103,6 +2132,13 @@ static void handle_command_body(char *line)
         return;
     }
 
+    if (strcmp(cmd, "true") == 0 || strcmp(cmd, ":") == 0)
+        return;
+    if (strcmp(cmd, "false") == 0) {
+        writestring("false\n");
+        return;
+    }
+
     writestring("Unknown command: ");
     writestring(cmd);
     writestring("\nType 'help' for commands.\n");
@@ -2133,6 +2169,10 @@ void shell_run(struct multiboot_info *mb)
     sw_running = 0;
     sw_elapsed = 0;
     sw_start_ticks = 0;
+    call_depth = 0;
+    shell_color = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    prompt_color = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    terminal_setcolor(shell_color);
     rng_state = timer_ticks() ^ 0xC0FFEEu;
     auth_init();
 
@@ -2221,7 +2261,7 @@ void shell_run(struct multiboot_info *mb)
             continue;
         }
 
-        if (c == 27)
+        if (c == 27 || c == '\t')
             continue;
 
         if (c >= 32 && c < 256 && len < INPUT_MAX) {

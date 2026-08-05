@@ -15,8 +15,6 @@ static volatile int extended;
 static volatile uint8_t last_make;
 static volatile int key_held;
 static volatile uint32_t last_make_tick;
-static volatile uint32_t last_push_tick;
-static volatile int last_push_code;
 
 static const char scancode_set1[] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -36,12 +34,9 @@ static const char scancode_set1_shift[] = {
 
 static void kbd_push(int c)
 {
-    uint32_t now = timer_ticks();
-    if (c == last_push_code && (now - last_push_tick) <= 3u)
-        return;
-    last_push_code = c;
-    last_push_tick = now;
-
+    /* Make/break debounce already happened in handle_scancode; pushing here
+       must not re-filter by character, or two quick distinct presses of the
+       same key (e.g. typing "ll") would lose the second keystroke. */
     unsigned int next = (kbd_head + 1) % KBD_BUF_SIZE;
     if (next == kbd_tail)
         return;
@@ -164,8 +159,6 @@ void keyboard_init(void)
     last_make = 0;
     key_held = 0;
     last_make_tick = 0;
-    last_push_tick = 0;
-    last_push_code = 0;
     while (inb(0x64) & 1)
         (void)inb(0x60);
 }
@@ -180,7 +173,6 @@ void keyboard_enable_irq_mode(void)
     kbd_tail = 0;
     key_held = 0;
     last_make = 0;
-    last_push_code = 0;
     ctrl_pressed = 0;
 }
 
@@ -247,7 +239,6 @@ void input_drain(void)
     extended = 0;
     key_held = 0;
     last_make = 0;
-    last_push_code = 0;
     serial_esc_state = 0;
 }
 

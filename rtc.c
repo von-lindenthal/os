@@ -22,7 +22,9 @@ void rtc_read(struct rtc_time *out)
     uint8_t second, minute, hour, day, month, year, century = 0;
     uint8_t reg_b;
 
-    while (rtc_updating())
+    /* Bounded: a stuck UIP bit must not hang the shell forever. */
+    int spins = 100000;
+    while (rtc_updating() && --spins > 0)
         ;
 
     second = cmos_read(0x00);

@@ -35,7 +35,8 @@ void ata_identify(void)
         return;
     }
 
-    /* Wait for ERR or DRQ */
+    /* Wait for ERR or DRQ (bounded so a misbehaving drive can't hang the shell) */
+    int spins = 100000;
     for (;;) {
         status = inb(0x1F7);
         if (status & 1) {
@@ -44,6 +45,10 @@ void ata_identify(void)
         }
         if (status & 0x08)
             break;
+        if (--spins <= 0) {
+            writestring("ATA IDENTIFY timed out.\n");
+            return;
+        }
     }
 
     for (int i = 0; i < 256; i++) {

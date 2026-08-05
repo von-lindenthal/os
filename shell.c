@@ -103,7 +103,13 @@ static unsigned int parse_uint(const char **pp)
     unsigned int n = 0;
     const char *p = *pp;
     while (*p >= '0' && *p <= '9') {
-        n = n * 10 + (unsigned int)(*p - '0');
+        unsigned int d = (unsigned int)(*p - '0');
+        /* Saturate instead of silently wrapping on overflow so huge inputs
+           can't wrap around into a small, seemingly-valid value. */
+        if (n > (0xFFFFFFFFu - d) / 10u)
+            n = 0xFFFFFFFFu;
+        else
+            n = n * 10u + d;
         p++;
     }
     *pp = p;
